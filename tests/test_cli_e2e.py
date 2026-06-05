@@ -131,6 +131,7 @@ def test_cli_live_api_flag_disables_offline_mode(monkeypatch):
     assert exit_code == 0
     assert captured["request"].live_api is True
     assert captured["request"].offline is False
+    assert captured["request"].full_text is True
 
 
 def test_cli_full_text_defaults_to_live_api(monkeypatch):
@@ -151,12 +152,38 @@ def test_cli_full_text_defaults_to_live_api(monkeypatch):
 
     monkeypatch.setattr(cli, "run_research", fake_run_research)
 
-    exit_code = cli.main(["run", "--question", "tumor immune communication", "--full-text"])
+    exit_code = cli.main(["run", "--question", "tumor immune communication"])
 
     assert exit_code == 0
     assert captured["request"].live_api is True
     assert captured["request"].offline is False
     assert captured["request"].full_text is True
+
+
+def test_cli_no_full_text_disables_default_full_text(monkeypatch):
+    _configure_dummy_llm(monkeypatch)
+    captured = {}
+
+    def fake_run_research(request):
+        captured["request"] = request
+        return {
+            "report_path": "report.md",
+            "manifest_path": "run_manifest.json",
+            "artifact_manifest_path": "artifact_manifest.json",
+            "search_log_path": "search_log.json",
+            "full_text_results_path": "full_text_results.json",
+            "review_synthesis_path": "review_synthesis.json",
+            "output_dir": "generated/medicine_agent",
+        }
+
+    monkeypatch.setattr(cli, "run_research", fake_run_research)
+
+    exit_code = cli.main(["run", "--question", "tumor immune communication", "--no-full-text"])
+
+    assert exit_code == 0
+    assert captured["request"].live_api is True
+    assert captured["request"].offline is False
+    assert captured["request"].full_text is False
 
 
 def test_cli_full_text_rejects_offline_mode():
@@ -242,6 +269,7 @@ def test_cli_defaults_to_live_api_and_data_dir_without_flags(monkeypatch):
     assert exit_code == 0
     assert captured["request"].live_api is True
     assert captured["request"].offline is False
+    assert captured["request"].full_text is True
     assert captured["request"].data_dir == Path("data")
 
 
@@ -452,6 +480,7 @@ def test_orchestrator_uses_llm_review_synthesis_when_available(monkeypatch, tmp_
             output_dir=tmp_path / "out",
             live_api=True,
             offline=False,
+            full_text=False,
         )
     )
 

@@ -8,7 +8,7 @@
 
 ```bash
 export DEEPSEEK_API_KEY="你的 DeepSeek key"
-export DEEPSEEK_MODEL="deepseek-chat"
+export DEEPSEEK_MODEL="deepseek-v4-pro"
 ```
 
 也可以用 `MEDICINE_AGENT_DEEPSEEK_API_KEY` 替代 `DEEPSEEK_API_KEY`。如果缺少 key 或 `DEEPSEEK_MODEL`，CLI 会直接报错退出，不会开始检索或写入输出目录。
@@ -21,7 +21,7 @@ PYTHONPATH=src python -m medicine_agent.cli run \
   --output-dir generated/medicine_agent
 ```
 
-默认流程会真实联网检索，不需要显式传 `--live-api`。大模型会被用于 query 改写、证据抽取和结构化综述；如果 query 规划或综述生成调用失败，运行会失败并提示检查 key、模型名、额度和网络。派生的报告、manifest 与表格会写入你指定的输出目录。
+默认流程会真实联网检索，并默认尝试获批路径上的全文/片段检索，不需要显式传 `--live-api` 或 `--full-text`。大模型会被用于 query 改写、证据抽取和结构化综述；如果 query 规划或综述生成调用失败，运行会失败并提示检查 key、模型名、额度和网络。派生的报告、manifest 与表格会写入你指定的输出目录。
 
 运行时会默认向 stderr 打印逐步调试日志，例如“开始文献检索”“跳过本地数据扫描”“开始写入产物”等；stdout 仍然只输出最终 JSON，方便脚本解析。如需关闭逐步日志，可增加 `--no-debug-steps`。
 
@@ -61,7 +61,7 @@ agent 会在联网模式下调用 DeepSeek OpenAI 兼容的 Chat Completions 接
 
 ```bash
 export DEEPSEEK_API_KEY="你的 DeepSeek key"
-export DEEPSEEK_MODEL="deepseek-chat"
+export DEEPSEEK_MODEL="deepseek-v4-pro"
 PYTHONPATH=src python -m medicine_agent.cli run \
   --question "帮我调研糖尿病研究的最新进展" \
   --output-dir generated/medicine_agent
@@ -103,16 +103,24 @@ LLM 综述会写入 `artifacts/review_synthesis.json`，并同步进入 `run_man
 
 ## 全文/片段检索
 
-如需在实时元数据检索后尝试获取获批路径上的全文证据，请增加 `--full-text`。因为联网现在是默认行为，不需要再额外传 `--live-api`：
+全文/片段检索默认开启。普通运行会在实时元数据检索后，尽可能尝试获取获批路径上的全文证据：
 
 ```bash
 PYTHONPATH=src python -m medicine_agent.cli run \
   --question "Intercellular communication analysis of single-cell transcriptomics data" \
-  --output-dir generated/medicine_agent \
-  --full-text
+  --output-dir generated/medicine_agent
 ```
 
-`--full-text` 仍然只使用获批来源路径：
+如需只做元数据/摘要检索，可显式关闭全文/片段检索：
+
+```bash
+PYTHONPATH=src python -m medicine_agent.cli run \
+  --question "帮我调研糖尿病研究的最新进展" \
+  --output-dir generated/medicine_agent_metadata_only \
+  --no-full-text
+```
+
+`--full-text` 仍可作为兼容旧用法的显式开关，但现在不是必需参数。全文检索只使用获批来源路径：
 
 - 当存在 PMCID/PMC 链接时，通过 NCBI E-utilities PubMed→PMC ELink 与 PMC EFetch XML 获取文本
 - 对 arXiv 记录构造 `https://arxiv.org/pdf/<arxiv-id>` PDF 产物 URL

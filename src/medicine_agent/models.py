@@ -59,7 +59,7 @@ class ResearchRequest:
     offline: bool = False
     include_preprints: bool = False
     live_api: bool = True
-    full_text: bool = False
+    full_text: bool = True
     debug_steps: bool = True
 
     def __post_init__(self) -> None:

@@ -31,7 +31,14 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--full-text",
         action="store_true",
-        help="在实时元数据检索后，尽可能获取获批路径上的全文/片段产物",
+        default=True,
+        help="兼容旧用法；全文/片段检索现在默认开启",
+    )
+    run.add_argument(
+        "--no-full-text",
+        action="store_false",
+        dest="full_text",
+        help="关闭默认全文/片段检索，只使用元数据/摘要证据",
     )
     run.add_argument("--include-preprints", action="store_true", help="在来源计划中包含预印本来源")
     run.add_argument("--no-debug-steps", action="store_true", help="不向 stderr 打印逐步调试日志")
