@@ -43,13 +43,24 @@ def render_report(
     lines += ["", "## 全文检索摘要", ""]
     lines.extend(_format_full_text_records(full_text_records, full_text_summary))
     lines += ["", "## 数据输入清单与方法", ""]
-    for rec in data_records:
-        lines.append(f"- `{rec.path}` ({rec.file_type}) — {rec.parser_status}; sha256={rec.sha256}; 警告={rec.warnings}")
+    if data_records:
+        for rec in data_records:
+            lines.append(f"- `{rec.path}` ({rec.file_type}) — {rec.parser_status}; sha256={rec.sha256}; 警告={rec.warnings}")
+    else:
+        lines.append("- 未读取本地数据文件；只有 query 明确要求查看 data 目录或数据文件时才会扫描。")
     lines += ["", "## LIANA 排名互作", "", f"排序方法: {liana_summary.get('ranking_method')}", ""]
-    for item in liana_summary.get("top_interactions", [])[:10]:
+    top_interactions = liana_summary.get("top_interactions", [])[:10]
+    if top_interactions:
+        for item in top_interactions:
+            lines.append(
+                f"- `{item['source_file']}#row-{item['row_index']}`: {item['source_cell']} -> {item['target_cell']} "
+                f"经由 {item['ligand']} -> {item['receptor']} (pvalue={item['pvalue']}, lr.mean={item['lr_mean']})"
+            )
+    else:
+        lines.append("- 未生成 LIANA 排名互作。")
+    for warning in liana_summary.get("warnings", []):
         lines.append(
-            f"- `{item['source_file']}#row-{item['row_index']}`: {item['source_cell']} -> {item['target_cell']} "
-            f"经由 {item['ligand']} -> {item['receptor']} (pvalue={item['pvalue']}, lr.mean={item['lr_mean']})"
+            f"- 数据/LIANA 说明：{warning}"
         )
     lines += ["", "## 证据表", "", "| ClaimStatus | 主张 | 证据引用 | 局限 |", "| --- | --- | --- | --- |"]
     for item in evidence:

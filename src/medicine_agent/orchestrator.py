@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import sys
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,18 +31,71 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+DATA_INSPECTION_MARKERS = (
+    "data/",
+    "data\\",
+    "data 目录",
+    "data目录",
+    "data directory",
+    "data dir",
+    "data folder",
+    "数据目录",
+    "数据文件",
+    "本地数据",
+    "我的数据",
+    "当前目录下data",
+    "当前目录 data",
+    "读取data",
+    "查看data",
+    "分析data",
+    "使用data",
+    "看data",
+    "csv",
+    ".csv",
+    "excel",
+    ".xlsx",
+    ".xls",
+    "word",
+    ".docx",
+    ".doc",
+    "liana",
+)
+
+
+def should_inspect_data_for_question(question: str) -> bool:
+    """仅当 query 明确提到 data 目录或本地数据文件时才读取本地数据。"""
+
+    normalized = " ".join(question.lower().split())
+    compact = normalized.replace(" ", "")
+    return any(marker in normalized or marker.replace(" ", "") in compact for marker in DATA_INSPECTION_MARKERS)
+
+
 def run_research(request: ResearchRequest) -> dict[str, Any]:
     """运行离线优先科研工作流，并写入生成产物。"""
 
+    debug_steps: list[dict[str, str]] = []
+
+    def step(message: str) -> None:
+        entry = {"timestamp": utc_now(), "message": message}
+        debug_steps.append(entry)
+        if request.debug_steps:
+            print(f"[medicine-agent] {message}", file=sys.stderr, flush=True)
+
+    step("开始运行科研工作流")
     start = utc_now()
     output_dir = request.output_dir
     safety = SafetyGate(data_dir=request.data_dir, output_dir=output_dir, non_interactive=True)
     clinical_decision = safety.screen_question(request.question)
+    if clinical_decision is None:
+        step("安全筛查通过：未检测到临床诊断/治疗请求")
+    else:
+        step(f"安全筛查阻断：{clinical_decision.rationale}")
 
     # 目录创建之后的所有写入都受 SafetyGate 约束；任何输入路径都不会被覆盖。
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir = output_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    step(f"已准备输出目录：{output_dir}")
 
     sources = select_sources(request.question)
     if request.include_preprints and "arxiv" not in sources:
@@ -51,8 +105,10 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         SourcePlan(source=query.provider, query=query.query, rationale=query.rationale)
         for query in decomposition.queries
     ]
+    step(f"已完成查询分解：{len(decomposition.subquestions)} 个子问题，来源={', '.join(sources)}")
 
     if clinical_decision is None:
+        step("开始文献检索")
         literature_payload = build_default_coordinator().search_question(
             request.question,
             allow_live=request.live_api and not request.offline,
@@ -62,7 +118,9 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         status_payloads = cast(list[Mapping[str, Any]], literature_payload["search_log"])
         paper_records = [_paper_from_provider_dict(item) for item in paper_payloads]
         source_statuses = [_status_from_provider_dict(item) for item in status_payloads]
+        step(f"文献检索完成：{len(paper_records)} 篇记录，{len(source_statuses)} 条来源状态")
     else:
+        step("因安全筛查阻断，跳过文献检索")
         literature_payload = {
             "decomposition": decomposition.to_dict(),
             "results": [],
@@ -94,6 +152,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         "reason": None if full_text_enabled else _full_text_disabled_reason(request, clinical_decision),
     }
     if full_text_enabled:
+        step("开始全文/片段检索")
         retrieved = retrieve_full_text_for_payloads(
             paper_payloads,
             artifacts_dir=artifacts_dir / "full_text",
@@ -101,12 +160,34 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             network_gate=safety,
         )
         full_text_payload.update(retrieved)
+        retrieved_records = cast(list[Mapping[str, object]], full_text_payload["records"])
+        step(f"全文/片段检索完成：{len(retrieved_records)} 条记录")
+    else:
+        step(f"跳过全文检索：{full_text_payload['reason']}")
     full_text_records = cast(list[Mapping[str, object]], full_text_payload["records"])
 
-    data_records = discover_data_files(request.data_dir, safety)
-    liana_summary = summarize_liana(data_records, safety)
-    rich_liana_summary = summarize_liana_files(request.data_dir, safety_gate=safety)
+    data_requested = clinical_decision is None and should_inspect_data_for_question(request.question)
+    if data_requested:
+        step(f"检测到本地数据读取请求，开始扫描数据目录：{request.data_dir}")
+        data_records = discover_data_files(request.data_dir, safety)
+        liana_summary = summarize_liana(data_records, safety)
+        rich_liana_summary: Any = summarize_liana_files(request.data_dir, safety_gate=safety)
+        step(
+            "数据处理完成："
+            f"{len(data_records)} 个数据文件，{len(liana_summary.get('top_interactions', []))} 条 LIANA 排名互作"
+        )
+    else:
+        reason = (
+            "query 未明确要求查看 data 目录或本地数据文件；已跳过本地数据扫描。"
+            if clinical_decision is None
+            else "安全筛查已阻断请求；已跳过本地数据扫描。"
+        )
+        step(reason)
+        data_records = []
+        liana_summary = _empty_liana_summary(request, reason)
+        rich_liana_summary = _empty_liana_detail_summary(request, reason)
 
+    step("开始构建证据表")
     evidence = build_evidence(
         request.question,
         paper_records,
@@ -125,6 +206,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             ),
         )
     validate_evidence(evidence)
+    step(f"证据表构建完成：{len(evidence)} 条证据项")
 
     top_csv = artifacts_dir / "liana_top_interactions.csv"
     liana_json = artifacts_dir / "liana_summary.json"
@@ -135,6 +217,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
     manifest_path = output_dir / "run_manifest.json"
     report_path = output_dir / "report.md"
 
+    step("开始写入 JSON、CSV 与报告产物")
     _write_top_interactions_csv(top_csv, liana_summary.get("top_interactions", []), safety)
     write_json(liana_json, _to_jsonable_liana_summary(rich_liana_summary), safety)
     write_json(literature_json, literature_payload, safety)
@@ -180,6 +263,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             "live_api": request.live_api,
             "include_preprints": request.include_preprints,
             "full_text": request.full_text,
+            "debug_steps": request.debug_steps,
         },
         "subquestions": list(decomposition.subquestions),
         "query_decomposition": decomposition.to_dict(),
@@ -192,8 +276,11 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         "evidence": [item.to_dict() for item in evidence],
         "warnings": sorted({warning for record in data_records for warning in record.warnings} | set(liana_summary.get("warnings", []))),
         "artifacts": artifact_paths,
+        "debug_steps": debug_steps,
         "research_only": True,
     }
+    step("写入运行清单并完成工作流")
+    manifest["debug_steps"] = debug_steps
     write_json(manifest_path, manifest, safety)
     return {
         "report_path": str(report_path),
@@ -253,6 +340,8 @@ def _status_from_provider_dict(item: Mapping[str, Any]) -> SourceStatus:
 
 
 def _to_jsonable_liana_summary(summary: Any) -> dict[str, Any]:
+    if isinstance(summary, Mapping):
+        return dict(summary)
     return {
         "generated_at": summary.generated_at,
         "input_dir": summary.input_dir,
@@ -261,6 +350,32 @@ def _to_jsonable_liana_summary(summary: Any) -> dict[str, Any]:
         "unranked_rows": summary.unranked_rows,
         "warnings": summary.warnings,
         "safety_decisions": summary.safety_decisions,
+    }
+
+
+def _empty_liana_summary(request: ResearchRequest, reason: str) -> dict[str, Any]:
+    return {
+        "ranking_method": "未请求本地数据分析；跳过 LIANA 排序。",
+        "top_interactions": [],
+        "unranked_interactions": [],
+        "warnings": [reason],
+        "files": [],
+        "safety_decisions": [],
+        "data_access_requested": False,
+        "input_dir": str(request.data_dir),
+    }
+
+
+def _empty_liana_detail_summary(request: ResearchRequest, reason: str) -> dict[str, Any]:
+    return {
+        "generated_at": utc_now(),
+        "input_dir": str(request.data_dir),
+        "files": [],
+        "ranked_interactions": [],
+        "unranked_rows": [],
+        "warnings": [reason],
+        "safety_decisions": [],
+        "data_access_requested": False,
     }
 
 

@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="在实时元数据检索后，尽可能获取获批路径上的全文/片段产物",
     )
     run.add_argument("--include-preprints", action="store_true", help="在来源计划中包含预印本来源")
+    run.add_argument("--no-debug-steps", action="store_true", help="不向 stderr 打印逐步调试日志")
     return parser
 
 
@@ -55,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
             live_api=args.live_api,
             include_preprints=args.include_preprints,
             full_text=args.full_text,
+            debug_steps=not args.no_debug_steps,
         ))
     except Exception as exc:
         print(f"medicine-agent 执行失败: {exc}", file=sys.stderr)

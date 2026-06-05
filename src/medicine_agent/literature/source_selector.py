@@ -19,8 +19,17 @@ BIOMEDICAL_TERMS = {
     "scrna",
     "liana",
     "biomarker",
+    "糖尿病",
+    "肿瘤",
+    "癌症",
+    "免疫",
+    "细胞",
+    "受体",
+    "配体",
+    "基因",
+    "蛋白",
 }
-PREPRINT_TERMS = {"preprint", "emerging", "latest", "novel", "recent"}
+PREPRINT_TERMS = {"preprint", "emerging", "latest", "novel", "recent", "最新", "新近", "预印本"}
 COMPUTATIONAL_TERMS = {
     "machine learning",
     "deep learning",

@@ -12,9 +12,23 @@ from medicine_agent.models import ResearchRequest
 def test_cli_offline_e2e_generates_required_artifacts_without_mutating_data(tmp_path):
     before = {p: p.stat().st_mtime_ns for p in Path("data").glob("*.csv")}
     out = tmp_path / "agent-out"
-    cmd = [sys.executable, "-m", "medicine_agent.cli", "run", "--question", "Which ligand receptor interactions are most relevant in tumor immune communication?", "--data-dir", "data", "--output-dir", str(out), "--offline"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "medicine_agent.cli",
+        "run",
+        "--question",
+        "请使用 data 目录中的 CSV 分析 tumor immune communication 中最相关的 ligand receptor interactions",
+        "--data-dir",
+        "data",
+        "--output-dir",
+        str(out),
+        "--offline",
+    ]
     proc = subprocess.run(cmd, text=True, capture_output=True, check=False, env={**__import__("os").environ, "PYTHONPATH": "src"})
     assert proc.returncode == 0, proc.stderr
+    assert "[medicine-agent]" in proc.stderr
+    assert "检测到本地数据读取请求" in proc.stderr
     result = json.loads(proc.stdout)
     for key in ["report_path", "manifest_path", "artifact_manifest_path", "search_log_path"]:
         assert Path(result[key]).exists(), key
@@ -25,6 +39,39 @@ def test_cli_offline_e2e_generates_required_artifacts_without_mutating_data(tmp_
     assert manifest["source_statuses"]
     assert manifest["data_files"]
     assert all(dec["operation"] != "OVERWRITE_INPUT" for dec in manifest["safety_decisions"])
+    after = {p: p.stat().st_mtime_ns for p in Path("data").glob("*.csv")}
+    assert before == after
+
+
+def test_cli_literature_only_question_skips_data_directory_and_prints_steps(tmp_path):
+    before = {p: p.stat().st_mtime_ns for p in Path("data").glob("*.csv")}
+    out = tmp_path / "literature-only"
+    cmd = [
+        sys.executable,
+        "-m",
+        "medicine_agent.cli",
+        "run",
+        "--question",
+        "帮我调研糖尿病研究的最新进展",
+        "--data-dir",
+        "data",
+        "--output-dir",
+        str(out),
+        "--offline",
+    ]
+
+    proc = subprocess.run(cmd, text=True, capture_output=True, check=False, env={**__import__("os").environ, "PYTHONPATH": "src"})
+
+    assert proc.returncode == 0, proc.stderr
+    assert "[medicine-agent]" in proc.stderr
+    assert "已跳过本地数据扫描" in proc.stderr
+    result = json.loads(proc.stdout)
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    report = Path(result["report_path"]).read_text(encoding="utf-8")
+    assert manifest["data_files"] == []
+    assert any("已跳过本地数据扫描" in step["message"] for step in manifest["debug_steps"])
+    assert not any(decision["operation"] == "READ_FILE" for decision in manifest["safety_decisions"])
+    assert "未读取本地数据文件" in report
     after = {p: p.stat().st_mtime_ns for p in Path("data").glob("*.csv")}
     assert before == after
 

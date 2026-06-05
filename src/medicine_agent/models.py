@@ -60,6 +60,7 @@ class ResearchRequest:
     include_preprints: bool = False
     live_api: bool = False
     full_text: bool = False
+    debug_steps: bool = True
 
     def __post_init__(self) -> None:
         if not self.question or not self.question.strip():
