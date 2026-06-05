@@ -15,10 +15,10 @@ usage() {
   QUESTION="新的科研问题" ./start.sh
 
 默认内置问题：
-  帮我调研糖尿病研究的最新进展
+  请先读取根目录 data/ 下的 CSV/LIANA 结果，找出最显著的 ligand-receptor 互作、source/target 细胞对和 top genes，然后结合 PubMed 和 Semantic Scholar 检索相关文献，解释这些互作在生信疾病研究中的可能意义。
 
 脚本内置参数：
-  - 问题：帮我调研糖尿病研究的最新进展
+  - 问题：请先读取根目录 data/ 下的 CSV/LIANA 结果，找出最显著的 ligand-receptor 互作、source/target 细胞对和 top genes，然后结合 PubMed 和 Semantic Scholar 检索相关文献，解释这些互作在生信疾病研究中的可能意义。
   - data 目录：./data
   - 输出目录：generated/medicine_agent
   - 联网检索：开启
@@ -58,7 +58,7 @@ if [[ -z "${DEEPSEEK_MODEL:-}" ]]; then
   exit 2
 fi
 
-DEFAULT_QUESTION="帮我调研糖尿病研究的最新进展"
+DEFAULT_QUESTION="请先读取根目录 data/ 下的 CSV/LIANA 结果，找出最显著的 ligand-receptor 互作、source/target 细胞对和 top genes，然后结合 PubMed 和 Semantic Scholar 检索相关文献，解释这些互作在生信疾病研究中的可能意义。"
 DEFAULT_DATA_DIR="data"
 DEFAULT_OUTPUT_DIR="generated/medicine_agent"
 
