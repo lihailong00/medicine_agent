@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from .llm import LLMConfigurationError, require_deepseek_config
 from .models import ResearchRequest
 from .orchestrator import run_research
 
@@ -20,12 +21,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--offline",
         action="store_true",
         default=False,
-        help="强制使用确定性的离线/模拟提供器；默认会使用受 allowlist 限制的联网检索",
+        help="已禁用：当前项目只支持联网 + LLM 模式",
     )
     run.add_argument(
         "--live-api",
         action="store_true",
-        help="兼容旧用法；现在默认已启用受 allowlist 限制的联网检索",
+        help="兼容旧用法；当前项目始终使用联网检索",
     )
     run.add_argument(
         "--full-text",
@@ -43,20 +44,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "run":
         parser.print_help(sys.stderr)
         return 2
-    if args.full_text and args.offline:
-        parser.error("--full-text 不能与 --offline 同时使用，因为全文检索属于实时网络操作")
-    live_api = not args.offline
+    if args.offline:
+        parser.error("当前项目只支持联网 + LLM 模式；--offline 已禁用")
     try:
+        require_deepseek_config()
         result = run_research(ResearchRequest(
             question=args.question,
             data_dir=Path(args.data_dir),
             output_dir=Path(args.output_dir),
-            offline=args.offline,
-            live_api=live_api,
+            offline=False,
+            live_api=True,
             include_preprints=args.include_preprints,
             full_text=args.full_text,
             debug_steps=not args.no_debug_steps,
         ))
+    except LLMConfigurationError as exc:
+        print(f"medicine-agent 配置错误: {exc}", file=sys.stderr)
+        return 2
     except Exception as exc:
         print(f"medicine-agent 执行失败: {exc}", file=sys.stderr)
         return 1

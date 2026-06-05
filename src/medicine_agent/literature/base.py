@@ -1,7 +1,8 @@
 """文献提供器共享的契约。
 
-首版实现刻意只使用标准库，并以离线/模拟优先。提供器网络调用必须通过显式
-SourceStatus 记录呈现；除非调用方显式开启 live 标志，否则绝不尝试联网。
+实现刻意只使用标准库，并只支持获批来源上的联网检索。提供器网络调用必须通过
+显式 SourceStatus 记录呈现；如果调用方显式禁用 live，必须返回可观测的跳过状态，
+而不是回退到离线 fixture。
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ class SearchQueryRecord:
     provider: str
     query: str
     rationale: str
-    endpoint_family: str = "offline_fixture"
+    endpoint_family: str = "unknown"
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -206,11 +207,11 @@ class LiteratureProvider(Protocol):
     provider_name: str
     endpoint_family: str
 
-    def search(self, query: str, *, allow_live: bool = False) -> ProviderSearchResult:
+    def search(self, query: str, *, allow_live: bool = True) -> ProviderSearchResult:
         """针对 ``query`` 检索文献。
 
-        实现默认必须是确定性的离线行为。如果 live 模式不可用或未被显式允许，
-        必须返回 SourceStatus 记录，而不是静默省略该提供器。
+        实现默认必须走联网检索。如果调用方显式设置 ``allow_live=False``，
+        必须返回 SourceStatus 记录说明已跳过，而不是静默省略或使用离线数据。
         """
 
 

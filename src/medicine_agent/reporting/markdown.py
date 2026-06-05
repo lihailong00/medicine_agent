@@ -78,7 +78,7 @@ def render_report(
     synthesis_limits = _string_list(_as_mapping(review_synthesis).get("limitations_conflicts"))
     if synthesis_limits:
         lines.extend(f"- {item}" for item in synthesis_limits)
-    lines.append("- 离线/模拟文献模式不能建立真实文献支持；实时学术检索必须显式启用并接受审计。")
+    lines.append("- 文献检索仅限获批 API 来源；检索日志与安全决策必须接受审计。")
     lines.append("- 全文检索仅限获批路径：NCBI/PMC XML、构造的 arXiv PDF 产物 URL 或 Semantic Scholar API 片段。")
     lines.append("- LIANA 排名是保留溯源的关联摘要，不是因果证明。")
     lines += ["", "## 生成产物", ""]

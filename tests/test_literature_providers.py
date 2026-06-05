@@ -85,25 +85,27 @@ def _fake_fetch_url(url: str, *, network_gate: SafetyGate | None = None, timeout
 
 
 class LiteratureProviderTests(unittest.TestCase):
-    def test_offline_provider_returns_source_status_and_citation_evidence(self):
-        result = PubMedProvider().search("single-cell ligand receptor communication")
+    def test_provider_default_search_uses_live_api_and_citation_evidence(self):
+        with patch("medicine_agent.literature.providers._fetch_url", side_effect=_fake_fetch_url):
+            result = PubMedProvider().search("single-cell ligand receptor communication")
 
         self.assertGreaterEqual(len(result.papers), 1)
         self.assertEqual(result.statuses[0].status, SourceStatusValue.SUCCEEDED)
-        self.assertEqual(result.statuses[0].endpoint_family, "offline_fixture")
+        self.assertEqual(result.statuses[0].endpoint_family, "ncbi_eutils")
         self.assertIn(result.papers[0].stable_id, result.statuses[0].result_ids)
         evidence = result.evidence_records()[0]
         self.assertEqual(evidence.provider, "pubmed")
         self.assertIn("元数据/摘要", evidence.evidence_note)
 
-    def test_live_mode_is_explicit_and_does_not_call_network_by_default(self):
+    def test_disabling_live_mode_skips_without_fixture_or_network(self):
         with patch("medicine_agent.literature.providers._fetch_url") as mocked_fetch:
-            result = SemanticScholarProvider().search("tumor microenvironment")
+            result = SemanticScholarProvider().search("tumor microenvironment", allow_live=False)
 
         mocked_fetch.assert_not_called()
-        self.assertGreaterEqual(len(result.papers), 1)
-        self.assertEqual(result.statuses[0].status, SourceStatusValue.SUCCEEDED)
-        self.assertEqual(result.statuses[0].endpoint_family, "offline_fixture")
+        self.assertEqual(result.papers, ())
+        self.assertEqual(result.statuses[0].status, SourceStatusValue.SKIPPED)
+        self.assertEqual(result.statuses[0].endpoint_family, "s2_graph")
+        self.assertIn("只支持联网检索", result.statuses[0].reason or "")
 
     def test_allowlisted_live_providers_parse_mocked_network_payloads(self):
         gate = SafetyGate(data_dir="data", output_dir="generated/medicine_agent")
@@ -141,7 +143,7 @@ class LiteratureProviderTests(unittest.TestCase):
         self.assertGreaterEqual(len(plan.subquestions), 2)
         self.assertTrue(all(query.query for query in plan.queries))
         self.assertTrue(all(query.rationale for query in plan.queries))
-        self.assertTrue(all(query.endpoint_family != "offline_fixture" for query in plan.queries))
+        self.assertEqual({query.endpoint_family for query in plan.queries}, {"ncbi_eutils", "s2_graph"})
 
     def test_chinese_diabetes_question_is_normalized_for_english_literature_apis(self):
         plan = decompose_question("帮我调研糖尿病研究的最新进展")
@@ -159,7 +161,8 @@ class LiteratureProviderTests(unittest.TestCase):
         self.assertEqual(parse_qs(urlparse(url).query)["sort"], ["pub_date"])
 
     def test_default_coordinator_produces_search_log_and_normalized_papers(self):
-        output = build_default_coordinator().search_question("single-cell tumor ligand receptor communication")
+        with patch("medicine_agent.literature.providers._fetch_url", side_effect=_fake_fetch_url):
+            output = build_default_coordinator().search_question("single-cell tumor ligand receptor communication")
 
         self.assertIn("decomposition", output)
         self.assertGreaterEqual(len(output["search_log"]), 2)
@@ -205,19 +208,19 @@ class LiteratureProviderTests(unittest.TestCase):
                 providers_mod._fetch_url("https://api.biorxiv.org/details/biorxiv/2024-01-01/2024-01-02")
         mocked_build_opener.assert_not_called()
 
-    def test_environment_live_flag_does_not_bypass_explicit_live_opt_in(self):
+    def test_environment_flag_does_not_reenable_when_live_is_explicitly_disabled(self):
         old = os.environ.get("MEDICINE_AGENT_LIVE_API")
         os.environ["MEDICINE_AGENT_LIVE_API"] = "1"
         try:
             with patch("medicine_agent.literature.providers._fetch_url", side_effect=_fake_fetch_url):
-                result = ArxivProvider().search("computational biology")
+                result = ArxivProvider().search("computational biology", allow_live=False)
         finally:
             if old is None:
                 os.environ.pop("MEDICINE_AGENT_LIVE_API", None)
             else:
                 os.environ["MEDICINE_AGENT_LIVE_API"] = old
-        self.assertEqual(result.statuses[0].status, SourceStatusValue.SUCCEEDED)
-        self.assertEqual(result.statuses[0].endpoint_family, "offline_fixture")
+        self.assertEqual(result.statuses[0].status, SourceStatusValue.SKIPPED)
+        self.assertEqual(result.statuses[0].endpoint_family, "arxiv_atom")
 
 
 if __name__ == "__main__":

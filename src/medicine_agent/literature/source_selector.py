@@ -80,6 +80,7 @@ def decompose_question(
     sources: tuple[str, ...] | None = None,
     *,
     allow_llm: bool = False,
+    require_llm: bool = False,
     network_gate: SafetyGate | None = None,
 ) -> QueryDecomposition:
     """创建检索分解；配置 key 且允许时优先使用 DeepSeek query 规划。"""
@@ -90,10 +91,12 @@ def decompose_question(
     selected_override = tuple(dict.fromkeys(sources)) if sources else None
     llm_plan = None
     if allow_llm:
-        from medicine_agent.llm import plan_query_with_llm  # 延迟导入，离线规则路径不加载 LLM 组件。
+        from medicine_agent.llm import plan_query_with_llm  # 延迟导入，避免规则路径加载 LLM 组件。
 
         allowed = selected_override or select_sources(cleaned)
         llm_plan = plan_query_with_llm(cleaned, allowed_sources=allowed, network_gate=network_gate)
+        if require_llm and llm_plan is None:
+            raise RuntimeError("LLM 查询规划失败：请检查 DEEPSEEK_API_KEY/MEDICINE_AGENT_DEEPSEEK_API_KEY、DEEPSEEK_MODEL 与网络连通性。")
 
     if llm_plan is not None:
         selected = selected_override or llm_plan.sources
@@ -109,7 +112,7 @@ def decompose_question(
             "哪些发现由元数据/摘要支持，哪些仍属于假设？",
         )
         planner = "deterministic"
-        planner_reason = "未启用 DeepSeek 环境变量或 LLM 规划失败；使用确定性关键词/中英映射规则。"
+        planner_reason = "未要求 LLM 规划；使用确定性关键词/中英映射规则。"
 
     queries = tuple(
         SearchQueryRecord(

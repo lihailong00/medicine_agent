@@ -22,12 +22,12 @@ def test_research_only_statement_is_strict():
 
 
 def test_source_status_observability_fields():
-    status = SourceStatus("pubmed", "offline_mock", "query", "succeeded", "now", ["id1"], reason="mock")
+    status = SourceStatus("pubmed", "ncbi_eutils", "query", "succeeded", "now", ["id1"], reason="mock")
     assert status.provider == "pubmed"
     assert status.result_ids == ["id1"]
 
 
-def test_live_metadata_only_evidence_is_not_called_offline_mock():
+def test_live_metadata_only_evidence_has_no_fixture_language():
     evidence = build_evidence(
         "ligand receptor communication",
         [PaperRecord(title="Live PubMed paper", abstract="abstract", source="pubmed", pmid="123")],
@@ -37,7 +37,7 @@ def test_live_metadata_only_evidence_is_not_called_offline_mock():
 
     literature = next(item for item in evidence if item.status == "literature_supported")
     assert "实时文献元数据/摘要" in literature.claim
-    assert "离线模拟" not in literature.claim
+    assert "fixture" not in literature.claim.lower()
 
 
 def test_synthesis_sanitizer_filters_unretrieved_references():

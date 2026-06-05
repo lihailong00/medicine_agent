@@ -1,10 +1,19 @@
 # Medicine Agent
 
-默认联网、仅科研用途的生信科研 agent CLI/库原型。真实文献检索默认开启，但始终严格限制到 PubMed/NCBI E-utilities、arXiv API 与 Semantic Scholar API；如需完全离线/fixture 模式，可显式传入 `--offline`。
+默认联网、仅科研用途的生信科研 agent CLI/库原型。项目只支持联网 + 大模型模式：文献检索严格限制到 PubMed/NCBI E-utilities、arXiv API 与 Semantic Scholar API；query 规划、证据抽取和结构化综述必须使用配置好的大模型。未配置 API key 或模型名时，程序会拒绝运行。
 
 ## 运行
 
-最常用命令只需要问题和输出目录；`data` 是默认输入目录，联网检索也是默认行为：
+运行前必须配置大模型 API key 和模型名：
+
+```bash
+export DEEPSEEK_API_KEY="你的 DeepSeek key"
+export DEEPSEEK_MODEL="deepseek-chat"
+```
+
+也可以用 `MEDICINE_AGENT_DEEPSEEK_API_KEY` 替代 `DEEPSEEK_API_KEY`。如果缺少 key 或 `DEEPSEEK_MODEL`，CLI 会直接报错退出，不会开始检索或写入输出目录。
+
+最常用命令只需要问题和输出目录；`data` 是默认输入目录，联网检索也是唯一运行模式：
 
 ```bash
 PYTHONPATH=src python -m medicine_agent.cli run \
@@ -12,7 +21,7 @@ PYTHONPATH=src python -m medicine_agent.cli run \
   --output-dir generated/medicine_agent
 ```
 
-默认流程会尝试真实联网检索，不需要显式传 `--live-api`。如果配置了 `DEEPSEEK_API_KEY`，还会使用 LLM 做 query 改写、证据抽取和结构化综述；没有 key 时会自动使用确定性降级逻辑。派生的报告、manifest 与表格会写入你指定的输出目录。
+默认流程会真实联网检索，不需要显式传 `--live-api`。大模型会被用于 query 改写、证据抽取和结构化综述；如果 query 规划或综述生成调用失败，运行会失败并提示检查 key、模型名、额度和网络。派生的报告、manifest 与表格会写入你指定的输出目录。
 
 运行时会默认向 stderr 打印逐步调试日志，例如“开始文献检索”“跳过本地数据扫描”“开始写入产物”等；stdout 仍然只输出最终 JSON，方便脚本解析。如需关闭逐步日志，可增加 `--no-debug-steps`。
 
@@ -26,14 +35,7 @@ PYTHONPATH=src python -m medicine_agent.cli run \
   --live-api
 ```
 
-如需完全离线 fixture 模式，请显式传入：
-
-```bash
-PYTHONPATH=src python -m medicine_agent.cli run \
-  --question "帮我调研糖尿病研究的最新进展" \
-  --output-dir generated/medicine_agent \
-  --offline
-```
+`--offline` 已禁用。传入 `--offline` 会直接退出并提示“当前项目只支持联网 + LLM 模式”。
 
 ## 何时读取 data 目录
 
@@ -53,20 +55,22 @@ agent 不会因为默认存在 `data/` 或传入了 `--data-dir data` 就自动�
 - `https://export.arxiv.org/api/query`：用于 arXiv
 - `https://api.semanticscholar.org/graph/v1/paper/search`：用于 Semantic Scholar
 
-### 可选：使用 DeepSeek 做 query 改写、证据抽取与结构化综述
+### 必需：使用 DeepSeek 做 query 改写、证据抽取与结构化综述
 
-如果设置了 `DEEPSEEK_API_KEY`（或 `MEDICINE_AGENT_DEEPSEEK_API_KEY`），agent 会在联网模式下调用 DeepSeek OpenAI 兼容的 Chat Completions 接口完成更适合 LLM 的语义任务。未设置 key、接口失败或使用 `--offline` 时，会自动降级为确定性规则，不影响主流程。
+agent 会在联网模式下调用 DeepSeek OpenAI 兼容的 Chat Completions 接口完成更适合 LLM 的语义任务。`DEEPSEEK_API_KEY`（或 `MEDICINE_AGENT_DEEPSEEK_API_KEY`）与 `DEEPSEEK_MODEL` 都是必需项；未设置或调用失败时不会使用规则降级，而是直接停止运行。
 
 ```bash
 export DEEPSEEK_API_KEY="你的 DeepSeek key"
+export DEEPSEEK_MODEL="deepseek-chat"
 PYTHONPATH=src python -m medicine_agent.cli run \
   --question "帮我调研糖尿病研究的最新进展" \
   --output-dir generated/medicine_agent
 ```
 
-可选环境变量：
+可配置环境变量：
 
-- `DEEPSEEK_MODEL`：默认 `deepseek-chat`
+- `DEEPSEEK_API_KEY` 或 `MEDICINE_AGENT_DEEPSEEK_API_KEY`：必需，DeepSeek API key
+- `DEEPSEEK_MODEL`：必需，例如 `deepseek-chat`
 - `DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`，会请求 `/chat/completions`
 - `DEEPSEEK_TIMEOUT_SECONDS`：默认与其他实时 API 一致
 
@@ -97,7 +101,7 @@ PYTHONPATH=src python -m medicine_agent.cli run \
   --full-text
 ```
 
-`--full-text` 不能与 `--offline` 同时使用。它仍然只使用获批来源路径：
+`--full-text` 仍然只使用获批来源路径：
 
 - 当存在 PMCID/PMC 链接时，通过 NCBI E-utilities PubMed→PMC ELink 与 PMC EFetch XML 获取文本
 - 对 arXiv 记录构造 `https://arxiv.org/pdf/<arxiv-id>` PDF 产物 URL
@@ -105,12 +109,12 @@ PYTHONPATH=src python -m medicine_agent.cli run \
 
 agent 会写出 `artifacts/full_text_results.json`，并在检索成功时写出逐篇论文的文本/PDF 产物。arXiv PDF 会作为审计产物保存，但不会在无额外依赖的前提下解析为全文文本。
 
-`--offline` 始终强制 fixture 模式并阻止真实网络调用，即使同时传入了 `--live-api`。
+项目没有离线 fixture 运行模式；`--offline` 始终被拒绝。
 
 ## 安全与证据策略
 
 - 所有有副作用的动作都必须经过 `SafetyGate`。
-- 证据性文献检索只允许访问 PubMed/NCBI、arXiv 与 Semantic Scholar API 主机；可选 DeepSeek 端点仅用于 query 改写、证据抽取与结构化综述。
+- 证据性文献检索只允许访问 PubMed/NCBI、arXiv 与 Semantic Scholar API 主机；必需的 DeepSeek 端点仅用于 query 改写、证据抽取与结构化综述。
 - 全文检索绝不跟随出版社链接或任意 `openAccessPdf` URL。
 - 依赖安装、API key 使用、长任务、脚本执行与覆盖写入在非交互模式下都需要确认。
 - 生物医学输出仅限科研用途，不是临床决策支持。

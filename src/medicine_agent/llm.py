@@ -14,11 +14,14 @@ from medicine_agent.safety import SafetyGate
 
 ALLOWED_LITERATURE_SOURCES = ("pubmed", "semantic_scholar", "arxiv")
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"
 MAX_SEARCH_TOPIC_CHARS = 320
 MAX_RATIONALE_CHARS = 500
 MAX_ABSTRACT_CHARS = 1800
 MAX_FULL_TEXT_PREVIEW_CHARS = 1800
+
+
+class LLMConfigurationError(ValueError):
+    """缺少必需 LLM 配置时抛出。"""
 
 
 @dataclass(frozen=True)
@@ -26,7 +29,7 @@ class DeepSeekConfig:
     """从环境变量读取的 DeepSeek API 配置。"""
 
     api_key: str
-    model: str = DEFAULT_DEEPSEEK_MODEL
+    model: str
     base_url: str = DEFAULT_DEEPSEEK_BASE_URL
     timeout: int = DEFAULT_TIMEOUT_SECONDS
 
@@ -61,15 +64,36 @@ class LLMQueryPlan:
 
 
 def load_deepseek_config() -> DeepSeekConfig | None:
-    """从环境变量加载 DeepSeek 配置；缺少 key 时返回 None。"""
+    """从环境变量加载 DeepSeek 配置；缺少 key 或模型名时返回 None。"""
 
     api_key = _first_env_value("DEEPSEEK_API_KEY", "MEDICINE_AGENT_DEEPSEEK_API_KEY")
-    if not api_key:
+    model = os.environ.get("DEEPSEEK_MODEL", "").strip()
+    if not api_key or not model:
         return None
-    model = os.environ.get("DEEPSEEK_MODEL", DEFAULT_DEEPSEEK_MODEL).strip() or DEFAULT_DEEPSEEK_MODEL
     base_url = os.environ.get("DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL).strip() or DEFAULT_DEEPSEEK_BASE_URL
     timeout = _env_int("DEEPSEEK_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)
     return DeepSeekConfig(api_key=api_key, model=model, base_url=base_url, timeout=timeout)
+
+
+def missing_deepseek_config() -> tuple[str, ...]:
+    """返回缺失的必需 DeepSeek 环境变量名。"""
+
+    missing: list[str] = []
+    if not _first_env_value("DEEPSEEK_API_KEY", "MEDICINE_AGENT_DEEPSEEK_API_KEY"):
+        missing.append("DEEPSEEK_API_KEY 或 MEDICINE_AGENT_DEEPSEEK_API_KEY")
+    if not os.environ.get("DEEPSEEK_MODEL", "").strip():
+        missing.append("DEEPSEEK_MODEL")
+    return tuple(missing)
+
+
+def require_deepseek_config() -> DeepSeekConfig:
+    """强制要求 DeepSeek API key 与模型名；缺失时阻止运行。"""
+
+    config = load_deepseek_config()
+    if config is None:
+        missing = "、".join(missing_deepseek_config())
+        raise LLMConfigurationError(f"缺少必需的大模型配置：{missing}。请先设置环境变量后再运行。")
+    return config
 
 
 def plan_query_with_llm(
@@ -78,7 +102,7 @@ def plan_query_with_llm(
     allowed_sources: Sequence[str] = ALLOWED_LITERATURE_SOURCES,
     network_gate: SafetyGate | None = None,
 ) -> LLMQueryPlan | None:
-    """使用 DeepSeek 生成英文检索主题；失败时返回 None 让调用方规则降级。"""
+    """使用 DeepSeek 生成英文检索主题；失败时返回 None，由调用方决定是否终止。"""
 
     config = load_deepseek_config()
     if config is None:
@@ -97,7 +121,7 @@ def plan_query_with_llm(
         content = _extract_message_content(response)
         plan_payload = _loads_json_object(content)
         return _sanitize_llm_plan(plan_payload, question=question, allowed_sources=sanitized_sources)
-    except Exception:  # noqa: BLE001 - LLM 规划必须可安全降级。
+    except Exception:  # noqa: BLE001 - LLM 规划失败由上层转为可读错误。
         return None
 
 
@@ -111,7 +135,7 @@ def synthesize_review_with_llm(
     allowed_refs: set[str],
     network_gate: SafetyGate | None = None,
 ) -> dict[str, object] | None:
-    """使用 DeepSeek 生成带引用的结构化综述；失败时返回 None。"""
+    """使用 DeepSeek 生成带引用的结构化综述；失败时返回 None，由调用方决定是否终止。"""
 
     config = load_deepseek_config()
     if config is None:
@@ -136,7 +160,7 @@ def synthesize_review_with_llm(
         raw = dict(_loads_json_object(content))
         raw.setdefault("source", "llm_deepseek")
         return sanitize_review_synthesis(raw, allowed_refs=allowed_refs)
-    except Exception:  # noqa: BLE001 - 综述生成必须可安全降级。
+    except Exception:  # noqa: BLE001 - 综述生成失败由上层转为可读错误。
         return None
 
 

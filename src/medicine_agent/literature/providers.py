@@ -1,7 +1,8 @@
-"""带离线 fixture 与 allowlist 实时 API 的文献提供器。
+"""仅联网、带 allowlist 的文献提供器。
 
-live 模式刻意保持狭窄：本模块唯一允许的网络目的地是 NCBI/PubMed E-utilities、
-arXiv Atom API 与 Semantic Scholar Graph API。不需要 API key 或标准库之外的依赖。
+联网模式刻意保持狭窄：本模块唯一允许的证据检索目的地是 NCBI/PubMed
+E-utilities、arXiv Atom API 与 Semantic Scholar Graph API。不需要 API key
+或标准库之外的依赖。
 """
 
 from __future__ import annotations
@@ -25,34 +26,31 @@ ALLOWED_LIVE_HOSTS = NETWORK_ALLOWED_LIVE_HOSTS
 
 
 @dataclass(frozen=True)
-class OfflineFixtureProvider:
+class LiveApiProvider:
     provider_name: str
     endpoint_family: str
-    fixture_records: tuple[PaperRecord, ...]
 
     def search(
         self,
         query: str,
         *,
-        allow_live: bool = False,
+        allow_live: bool = True,
         network_gate: SafetyGate | None = None,
         max_results: int = DEFAULT_MAX_RESULTS,
     ) -> ProviderSearchResult:
         if allow_live:
             return self._search_live(query, network_gate=network_gate, max_results=max_results)
-        matches = _filter_fixture_records(self.fixture_records, query)
         status = SourceStatus(
             provider=self.provider_name,
-            endpoint_family="offline_fixture",
+            endpoint_family=self.endpoint_family,
             query=query,
-            status=SourceStatusValue.SUCCEEDED,
-            result_ids=tuple(paper.stable_id for paper in matches),
-            reason="已使用确定性离线 fixture 提供器；未尝试网络调用",
+            status=SourceStatusValue.SKIPPED,
+            reason="当前项目只支持联网检索；显式禁用 live 时不会使用离线 fixture。",
         )
         return ProviderSearchResult(
             provider=self.provider_name,
             query=query,
-            papers=matches,
+            papers=(),
             statuses=(status,),
         )
 
@@ -68,7 +66,7 @@ class OfflineFixtureProvider:
             endpoint_family=self.endpoint_family,
             query=query,
             status=SourceStatusValue.FAILED,
-            reason="该提供器尚未实现 live 检索",
+            reason="该提供器尚未实现联网检索",
         )
         return ProviderSearchResult(self.provider_name, query, (), (status,))
 
@@ -76,9 +74,9 @@ class OfflineFixtureProvider:
         raise NotImplementedError
 
 
-class PubMedProvider(OfflineFixtureProvider):
+class PubMedProvider(LiveApiProvider):
     def __init__(self) -> None:
-        super().__init__("pubmed", "ncbi_eutils", _PUBMED_FIXTURES)
+        super().__init__("pubmed", "ncbi_eutils")
 
     def build_live_url(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> str:
         params = {
@@ -125,13 +123,13 @@ class PubMedProvider(OfflineFixtureProvider):
                 reason=f"实时 NCBI ESearch+EFetch 已完成，得到 {len(papers)} 条 PubMed 记录",
             )
             return ProviderSearchResult(self.provider_name, query, papers, (status,))
-        except Exception as exc:  # noqa: BLE001 - 提供器必须降级为 SourceStatus。
+        except Exception as exc:  # noqa: BLE001 - 提供器异常必须转为 SourceStatus。
             return _failed_result(self.provider_name, self.endpoint_family, query, exc)
 
 
-class ArxivProvider(OfflineFixtureProvider):
+class ArxivProvider(LiveApiProvider):
     def __init__(self) -> None:
-        super().__init__("arxiv", "arxiv_atom", _ARXIV_FIXTURES)
+        super().__init__("arxiv", "arxiv_atom")
 
     def build_live_url(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> str:
         params = {
@@ -167,9 +165,9 @@ class ArxivProvider(OfflineFixtureProvider):
             return _failed_result(self.provider_name, self.endpoint_family, query, exc)
 
 
-class SemanticScholarProvider(OfflineFixtureProvider):
+class SemanticScholarProvider(LiveApiProvider):
     def __init__(self) -> None:
-        super().__init__("semantic_scholar", "s2_graph", _SEMANTIC_SCHOLAR_FIXTURES)
+        super().__init__("semantic_scholar", "s2_graph")
 
     def build_live_url(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> str:
         fields = "paperId,title,abstract,year,authors,citationCount,externalIds,openAccessPdf,url,venue"
@@ -202,13 +200,13 @@ class SemanticScholarProvider(OfflineFixtureProvider):
 
 @dataclass(frozen=True)
 class LiteratureSearchCoordinator:
-    providers: Mapping[str, OfflineFixtureProvider]
+    providers: Mapping[str, LiveApiProvider]
 
     def search_question(
         self,
         question: str,
         *,
-        allow_live: bool = False,
+        allow_live: bool = True,
         network_gate: SafetyGate | None = None,
         max_results: int = DEFAULT_MAX_RESULTS,
         decomposition: QueryDecomposition | None = None,
@@ -440,28 +438,6 @@ def _failed_result(provider: str, endpoint_family: str, query: str, exc: Excepti
     )
 
 
-def _filter_fixture_records(records: tuple[PaperRecord, ...], query: str) -> tuple[PaperRecord, ...]:
-    tokens = {
-        token.strip("()[]{}.,;:!?\"'").lower()
-        for token in query.split()
-        if len(token.strip("()[]{}.,;:!?\"'")) >= 4
-    }
-    if not tokens:
-        return records[:1]
-    scored: list[tuple[int, PaperRecord]] = []
-    for record in records:
-        haystack = " ".join(
-            value for value in (record.title, record.abstract or "", record.venue or "")
-        ).lower()
-        score = sum(1 for token in tokens if token in haystack)
-        if score:
-            scored.append((score, record))
-    if not scored:
-        return records[:1]
-    scored.sort(key=lambda item: (-item[0], item[1].year or 0, item[1].title))
-    return tuple(record for _, record in scored[:5])
-
-
 def _dedupe_papers(papers: Iterable[PaperRecord]) -> tuple[PaperRecord, ...]:
     seen: set[str] = set()
     deduped: list[PaperRecord] = []
@@ -508,61 +484,3 @@ def _year_from_prefix(value: str) -> int | None:
     if len(value) >= 4 and value[:4].isdigit():
         return int(value[:4])
     return None
-
-
-_PUBMED_FIXTURES = (
-    PaperRecord(
-        provider="pubmed",
-        pmid="34763053",
-        pmcid="PMC8576925",
-        doi="10.1038/s41586-021-03929-7",
-        title="Intercellular communication analysis of single-cell transcriptomics data",
-        abstract="A benchmark and framework for ligand-receptor inference in single-cell data.",
-        year=2021,
-        venue="Nature",
-        authors=("Dimitrov D", "Türei D"),
-        source_url="https://pubmed.ncbi.nlm.nih.gov/34763053/",
-        open_access_url="https://pmc.ncbi.nlm.nih.gov/articles/PMC8576925/",
-    ),
-    PaperRecord(
-        provider="pubmed",
-        pmid="30664773",
-        doi="10.1038/s41586-019-0938-7",
-        title="Single-cell transcriptomics of human tumors reveals immune cell states",
-        abstract="Single-cell RNA sequencing characterizes tumor microenvironment cell states and interactions.",
-        year=2019,
-        venue="Nature",
-        authors=("Sade-Feldman M",),
-        source_url="https://pubmed.ncbi.nlm.nih.gov/30664773/",
-    ),
-)
-
-_ARXIV_FIXTURES = (
-    PaperRecord(
-        provider="arxiv",
-        arxiv_id="2301.00001",
-        title="Graph neural models for computational biology interaction ranking",
-        abstract="Computational biology fixture covering machine learning ranking of interactions.",
-        year=2023,
-        venue="arXiv",
-        authors=("Fixture B",),
-        source_url="https://arxiv.org/abs/2301.00001",
-        open_access_url="https://arxiv.org/pdf/2301.00001",
-    ),
-)
-
-_SEMANTIC_SCHOLAR_FIXTURES = (
-    PaperRecord(
-        provider="semantic_scholar",
-        semantic_scholar_id="S2-FIXTURE-LIANA",
-        doi="10.1038/s41586-021-03929-7",
-        title="Intercellular communication resources integrated for ligand receptor analysis",
-        abstract="Semantic Scholar metadata fixture with citation enrichment for LIANA-style analysis.",
-        year=2021,
-        venue="Nature",
-        authors=("Dimitrov D",),
-        citation_count=500,
-        source_url="https://www.semanticscholar.org/paper/S2-FIXTURE-LIANA",
-        open_access_url="https://pmc.ncbi.nlm.nih.gov/articles/PMC8576925/",
-    ),
-)

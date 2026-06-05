@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "medicine-agent"
 version = "0.1.0"
-description = "默认联网、仅科研用途的生信科研 agent"
+description = "默认联网且必须配置大模型的生信科研 agent"
 requires-python = ">=3.11"
 dependencies = []
 

@@ -45,9 +45,9 @@ def build_evidence(
                 "实时元数据/摘要记录不是全文证据；如需尝试获批的全文/片段产物，请启用 --full-text。",
             ]
         else:
-            claim = "离线文献检索生成了可追踪占位记录，用于可复现工作流验证。"
+            claim = "文献记录缺少实时检索标记；综合时必须回查检索日志确认来源范围。"
             confidence = "low"
-            limitations = ["离线模拟记录不是科学证据；真实文献检索需启用经过审查的实时提供器。"]
+            limitations = ["当前项目只支持联网检索；若出现该状态，请检查调用方是否误传 live_literature_enabled=False。"]
         evidence.append(EvidenceItem(
             claim=claim,
             status="literature_supported",

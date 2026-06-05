@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from medicine_agent.literature.source_selector import decompose_question
-from medicine_agent.llm import DeepSeekConfig, plan_query_with_llm
+from medicine_agent.llm import DeepSeekConfig, LLMConfigurationError, plan_query_with_llm, require_deepseek_config
 from medicine_agent.safety import SafetyGate
 
 
@@ -30,7 +30,7 @@ class LLMQueryPlanningTests(unittest.TestCase):
             ]
         }
 
-        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dummy-test-key"}, clear=False):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dummy-test-key", "DEEPSEEK_MODEL": "deepseek-chat"}, clear=False):
             with patch("medicine_agent.llm._post_deepseek_chat", return_value=response) as mocked_post:
                 plan = decompose_question("帮我调研糖尿病研究的最新进展", allow_llm=True)
 
@@ -48,6 +48,15 @@ class LLMQueryPlanningTests(unittest.TestCase):
 
         mocked_post.assert_not_called()
         self.assertIsNone(plan)
+
+    def test_required_deepseek_config_rejects_missing_key_or_model(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dummy-test-key"}, clear=True):
+            with self.assertRaisesRegex(LLMConfigurationError, "DEEPSEEK_MODEL"):
+                require_deepseek_config()
+
+        with patch.dict(os.environ, {"DEEPSEEK_MODEL": "deepseek-chat"}, clear=True):
+            with self.assertRaisesRegex(LLMConfigurationError, "DEEPSEEK_API_KEY"):
+                require_deepseek_config()
 
     def test_llm_network_decision_logs_endpoint_without_secret_header(self):
         class FakeResponse:
@@ -92,7 +101,7 @@ class LLMQueryPlanningTests(unittest.TestCase):
                 return FakeResponse(json.dumps(response).encode())
 
         gate = SafetyGate(data_dir="data", output_dir="generated/medicine_agent")
-        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dummy-test-key"}, clear=False):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dummy-test-key", "DEEPSEEK_MODEL": "deepseek-chat"}, clear=False):
             with patch("medicine_agent.network_policy.build_opener", return_value=FakeOpener()):
                 plan = plan_query_with_llm("tumor immune ligand receptor", allowed_sources=("pubmed",), network_gate=gate)
 
@@ -103,11 +112,11 @@ class LLMQueryPlanningTests(unittest.TestCase):
 
     def test_deepseek_config_builds_openai_compatible_chat_url(self):
         self.assertEqual(
-            DeepSeekConfig(api_key="x").chat_completions_url,
+            DeepSeekConfig(api_key="x", model="deepseek-chat").chat_completions_url,
             "https://api.deepseek.com/chat/completions",
         )
         self.assertEqual(
-            DeepSeekConfig(api_key="x", base_url="https://api.deepseek.com/v1").chat_completions_url,
+            DeepSeekConfig(api_key="x", model="deepseek-chat", base_url="https://api.deepseek.com/v1").chat_completions_url,
             "https://api.deepseek.com/v1/chat/completions",
         )
 

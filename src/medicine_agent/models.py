@@ -65,8 +65,12 @@ class ResearchRequest:
     def __post_init__(self) -> None:
         if not self.question or not self.question.strip():
             raise ValueError("必须提供科研问题")
-        if self.full_text and (self.offline or not self.live_api):
-            raise ValueError("full_text 需要 live_api=True 且 offline=False")
+        if self.offline:
+            raise ValueError("当前项目只支持联网模式；请不要设置 offline=True 或传入 --offline")
+        if not self.live_api:
+            raise ValueError("当前项目只支持联网模式；live_api 必须为 True")
+        if self.full_text and not self.live_api:
+            raise ValueError("full_text 需要联网模式")
         object.__setattr__(self, "data_dir", Path(self.data_dir))
         object.__setattr__(self, "output_dir", Path(self.output_dir))
 

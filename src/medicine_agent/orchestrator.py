@@ -12,7 +12,7 @@ from .data.liana import summarize_liana, summarize_liana_files
 from .literature.fulltext import retrieve_full_text_for_payloads
 from .literature.providers import build_default_coordinator
 from .literature.source_selector import decompose_question, select_sources
-from .llm import synthesize_review_with_llm
+from .llm import require_deepseek_config, synthesize_review_with_llm
 from .models import (
     EvidenceItem,
     OperationClass,
@@ -84,6 +84,8 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             print(f"[medicine-agent] {message}", file=sys.stderr, flush=True)
 
     step("开始运行科研工作流")
+    llm_config = require_deepseek_config()
+    step(f"大模型配置检查通过：model={llm_config.model}")
     start = utc_now()
     output_dir = request.output_dir
     safety = SafetyGate(data_dir=request.data_dir, output_dir=output_dir, non_interactive=True)
@@ -104,12 +106,13 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         sources_override = select_sources(request.question)
         if "arxiv" not in sources_override:
             sources_override = (*sources_override, "arxiv")
-    planner_candidate = "DeepSeek LLM（若已配置环境变量，否则规则降级）" if request.live_api and not request.offline else "确定性规则"
+    planner_candidate = "DeepSeek LLM（必需）"
     step(f"开始查询分解：规划器候选={planner_candidate}")
     decomposition = decompose_question(
         request.question,
         sources=sources_override,
-        allow_llm=request.live_api and not request.offline,
+        allow_llm=True,
+        require_llm=True,
         network_gate=safety,
     )
     sources = tuple(query.provider for query in decomposition.queries)
@@ -126,7 +129,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         step("开始文献检索")
         literature_payload = build_default_coordinator().search_question(
             request.question,
-            allow_live=request.live_api and not request.offline,
+            allow_live=True,
             network_gate=safety,
             decomposition=decomposition,
         )
@@ -158,7 +161,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             for plan in source_plans
         ]
 
-    full_text_enabled = request.full_text and request.live_api and not request.offline and clinical_decision is None
+    full_text_enabled = request.full_text and clinical_decision is None
     full_text_payload: dict[str, object] = {
         "requested": request.full_text,
         "enabled": full_text_enabled,
@@ -211,7 +214,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         liana_summary.get("top_interactions", []),
         full_text_records if full_text_enabled else None,
         full_text_enabled=full_text_enabled,
-        live_literature_enabled=request.live_api and not request.offline and clinical_decision is None,
+        live_literature_enabled=clinical_decision is None,
     )
     if clinical_decision is not None:
         evidence.insert(
@@ -226,10 +229,10 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
     step(f"基础证据表构建完成：{len(evidence)} 条证据项")
 
     review_allowed_refs = allowed_evidence_refs(paper_records, interactions_for_review)
-    review_synthesis: dict[str, object] | None = None
-    if request.live_api and not request.offline and clinical_decision is None:
+    review_synthesis: dict[str, object]
+    if clinical_decision is None:
         step("开始 LLM 证据抽取与结构化综述生成")
-        review_synthesis = synthesize_review_with_llm(
+        llm_synthesis = synthesize_review_with_llm(
             request.question,
             papers=paper_records,
             evidence=evidence,
@@ -238,14 +241,20 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             allowed_refs=review_allowed_refs,
             network_gate=safety,
         )
-        if review_synthesis is not None:
-            evidence = evidence_from_synthesis(review_synthesis, evidence, allowed_refs=review_allowed_refs)
-            validate_evidence(evidence)
-            step(f"LLM 结构化综述完成：证据表替换为 {len(evidence)} 条 LLM 清洗证据项")
-        else:
-            step("LLM 结构化综述不可用：未配置 key 或调用/解析失败，使用规则模板")
-    if review_synthesis is None:
-        review_synthesis = build_rule_based_review_synthesis(request.question, paper_records, evidence)
+        if llm_synthesis is None:
+            raise RuntimeError("LLM 结构化综述失败：请检查 DEEPSEEK_API_KEY/MEDICINE_AGENT_DEEPSEEK_API_KEY、DEEPSEEK_MODEL、额度与网络连通性。")
+        review_synthesis = llm_synthesis
+        evidence = evidence_from_synthesis(review_synthesis, evidence, allowed_refs=review_allowed_refs)
+        validate_evidence(evidence)
+        step(f"LLM 结构化综述完成：证据表替换为 {len(evidence)} 条 LLM 清洗证据项")
+    else:
+        review_synthesis = build_rule_based_review_synthesis(
+            request.question,
+            paper_records,
+            evidence,
+            source="safety_blocked",
+            reason="安全筛查阻断了文献与 LLM 综述生成。",
+        )
     step(f"证据表构建完成：{len(evidence)} 条证据项；综述来源={review_synthesis.get('source')}")
 
     top_csv = artifacts_dir / "liana_top_interactions.csv"
@@ -430,8 +439,4 @@ def _full_text_disabled_reason(request: ResearchRequest, clinical_decision: obje
         return "临床安全筛查已跳过文献与全文检索。"
     if not request.full_text:
         return "未请求全文检索。"
-    if request.offline:
-        return "全文检索需要实时 API 模式，在离线模式下已禁用。"
-    if not request.live_api:
-        return "全文检索需要实时联网模式；请不要使用 --offline。"
     return "全文检索已禁用。"
