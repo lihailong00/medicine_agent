@@ -20,7 +20,10 @@ def sha256_file(path: Path) -> str:
 def write_json(path: Path, payload: Any, safety: SafetyGate) -> None:
     safety.assert_allowed(OperationClass.WRITE_DERIVED_OUTPUT, path, "写入派生 JSON 产物")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n",
+        encoding="utf-8",
+    )
 
 
 def write_text(path: Path, text: str, safety: SafetyGate) -> None:

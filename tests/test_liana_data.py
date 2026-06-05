@@ -74,7 +74,7 @@ class LianaDataTests(unittest.TestCase):
             data_dir = Path(tmp) / "data"
             output_dir = Path(tmp) / "generated"
             data_dir.mkdir()
-            write_csv(data_dir / "liana.csv", [["A", "B", "L", "L", "R", "R", "0.1", "0.2", "3", "4", "9", "0.001"]])
+            write_csv(data_dir / "liana.csv", [["A", "B", "蛋白L", "蛋白L", "受体R", "受体R", "0.1", "0.2", "3", "4", "9", "0.001"]])
             before = (data_dir / "liana.csv").read_bytes()
 
             artifacts = process_data_dir(data_dir, output_dir, top_n=5)
@@ -86,6 +86,9 @@ class LianaDataTests(unittest.TestCase):
                 self.assertTrue(path.resolve().is_relative_to(output_dir.resolve()))
             interactions = json.loads(artifacts["liana_interactions"].read_text(encoding="utf-8"))
             self.assertEqual(interactions["ranked_interactions"][0]["provenance"]["csv_row_number"], 2)
+            raw_interactions = artifacts["liana_interactions"].read_text(encoding="utf-8")
+            self.assertIn("蛋白L", raw_interactions)
+            self.assertNotIn("\\u86cb\\u767d", raw_interactions)
             manifest = json.loads(artifacts["data_manifest"].read_text(encoding="utf-8"))
             self.assertTrue(manifest["research_only"])
             self.assertTrue(any(d["operation"] == "WRITE_DERIVED_OUTPUT" for d in manifest["safety_decisions"]))

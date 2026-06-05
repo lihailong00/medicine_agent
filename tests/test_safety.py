@@ -6,6 +6,7 @@ import pytest
 from medicine_agent.models import OperationClass, SafetyDecisionStatus
 from medicine_agent.network_policy import AllowlistRedirectHandler, assert_url_allowed, classify_allowed_url, fetch_url_bytes
 from medicine_agent.safety import SafetyGate
+from medicine_agent.utils.io import write_json
 
 
 def test_safety_gate_allows_only_derived_output_writes(tmp_path):
@@ -14,6 +15,17 @@ def test_safety_gate_allows_only_derived_output_writes(tmp_path):
     blocked = gate.decide(OperationClass.WRITE_DERIVED_OUTPUT, tmp_path / "elsewhere.md", "outside")
     assert allowed.status == SafetyDecisionStatus.ALLOWED
     assert blocked.status == SafetyDecisionStatus.BLOCKED
+
+
+def test_write_json_preserves_utf8_chinese_text(tmp_path):
+    gate = SafetyGate(Path("data"), tmp_path / "out")
+    path = tmp_path / "out" / "artifact.json"
+
+    write_json(path, {"claim": "蛋白互作"}, gate)
+
+    raw = path.read_text(encoding="utf-8")
+    assert "蛋白互作" in raw
+    assert "\\u86cb\\u767d" not in raw
 
 
 def test_safety_gate_requires_confirmation_for_high_risk_ops(tmp_path):
