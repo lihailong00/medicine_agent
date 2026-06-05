@@ -1,4 +1,4 @@
-"""Full-text retrieval contracts and allowlisted scholarly fetchers."""
+"""全文检索契约与 allowlist 学术抓取器。"""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ class FullTextCandidate:
         return cls(
             provider=str(data.get("provider") or data.get("source") or "unknown"),
             paper_id=paper_id,
-            title=str(data.get("title") or "Untitled record"),
+            title=str(data.get("title") or "未命名记录"),
             source_url=data.get("source_url") if isinstance(data.get("source_url"), str) else None,
             pmid=data.get("pmid") if isinstance(data.get("pmid"), str) else None,
             pmcid=data.get("pmcid") if isinstance(data.get("pmcid"), str) else None,
@@ -180,7 +180,7 @@ def build_pubmed_to_pmc_elink_url(pmid: str) -> str:
 def build_pmc_efetch_url(pmcid_or_uid: str) -> str:
     normalized = normalize_pmcid(pmcid_or_uid)
     if normalized is None:
-        raise ValueError(f"invalid PMCID/PMC UID: {pmcid_or_uid}")
+        raise ValueError(f"无效的 PMCID/PMC UID: {pmcid_or_uid}")
     params = {
         "db": "pmc",
         "id": normalized.uid,
@@ -231,10 +231,10 @@ def parse_pmc_xml(xml_payload: str | bytes, *, max_chars: int = DEFAULT_MAX_FULL
     sections: list[str] = []
     title = _first_text(root, "article-title")
     if title:
-        sections.append(f"Title: {title}")
+        sections.append(f"标题: {title}")
     abstract_parts = _texts_under_first(root, "abstract", include_tags={"title", "p", "abstract"})
     if abstract_parts:
-        sections.append("Abstract:\n" + "\n".join(abstract_parts))
+        sections.append("摘要:\n" + "\n".join(abstract_parts))
     body = _first_element(root, "body")
     if body is not None:
         body_parts: list[str] = []
@@ -248,18 +248,18 @@ def parse_pmc_xml(xml_payload: str | bytes, *, max_chars: int = DEFAULT_MAX_FULL
             elif local == "p":
                 body_parts.append(text)
         if body_parts:
-            sections.append("Body:\n" + "\n".join(body_parts))
+            sections.append("正文:\n" + "\n".join(body_parts))
     license_text = _first_text(root, "license-p")
     if license_text:
-        sections.append(f"License: {license_text}")
+        sections.append(f"许可证: {license_text}")
     ref_count = sum(1 for element in root.iter() if _local_name(element.tag) == "ref")
     if ref_count:
-        sections.append(f"References count: {ref_count}")
+        sections.append(f"参考文献数量: {ref_count}")
     text = _collapse_whitespace("\n\n".join(sections))
     truncated = len(text) > max_chars
     if truncated:
         text = text[:max_chars].rstrip() + "\n[TRUNCATED]"
-    limitations = ("PMC XML parsed with stdlib ElementTree; tables/figures/supplements are not fully extracted.",)
+    limitations = ("PMC XML 使用标准库 ElementTree 解析；表格、图和补充材料不会被完整抽取。",)
     return ParsedFullText(
         text=text,
         parser="pmc_jats_elementtree",
@@ -293,7 +293,7 @@ def retrieve_pmc_full_text(
             )
             normalized = normalize_pmcid(uid)
         if normalized is None:
-            return _unavailable_record(candidate, "No PMCID/PMC link available from approved NCBI path.")
+            return _unavailable_record(candidate, "获批 NCBI 路径没有可用的 PMCID/PMC 链接。")
 
         efetch_url = build_pmc_efetch_url(normalized.uid)
         source_url = efetch_url
@@ -320,10 +320,10 @@ def retrieve_pmc_full_text(
             sha256=hashlib.sha256(encoded).hexdigest(),
             truncated=parsed.truncated,
             parser_limitations=parsed.parser_limitations,
-            reason=f"Retrieved PMC full text for {normalized.display} via NCBI EFetch.",
+            reason=f"已通过 NCBI EFetch 获取 {normalized.display} 的 PMC 全文。",
         )
         return FullTextRecord(candidate, status, parsed.text[:500])
-    except Exception as exc:  # noqa: BLE001 - full-text retrieval should degrade per paper.
+    except Exception as exc:  # noqa: BLE001 - 全文检索应按单篇论文降级。
         return _failed_record(candidate, source_url, exc)
 
 
@@ -384,9 +384,9 @@ def retrieve_best_available_text(
             return _abstract_record(candidate, snippet_record.status.reason, attempts=tuple(attempts))
         return _with_attempts(snippet_record, attempts[:-1])
     if candidate.abstract:
-        reason = attempts[-1].reason if attempts else "No approved full-text route is available; using provider abstract scope."
+        reason = attempts[-1].reason if attempts else "没有可用的获批全文路径；使用提供器摘要范围。"
         return _abstract_record(candidate, reason, attempts=tuple(attempts))
-    return _unavailable_record(candidate, "No approved full-text or snippet route is available for this record.")
+    return _unavailable_record(candidate, "该记录没有可用的获批全文或片段路径。")
 
 
 def retrieve_full_text_for_payloads(
@@ -398,11 +398,10 @@ def retrieve_full_text_for_payloads(
     fetcher: FetchUrl = fetch_url_bytes,
     max_chars: int = DEFAULT_MAX_FULL_TEXT_CHARS,
 ) -> dict[str, object]:
-    """Retrieve best available approved full-text evidence for provider payloads.
+    """为提供器 payload 获取最佳可用的获批全文证据。
 
-    The returned structure is intentionally manifest/report friendly and records
-    every per-paper success, skip, rate limit, or failure without aborting the
-    whole research run.
+    返回结构刻意面向 manifest/报告，逐篇记录成功、跳过、限流或失败，
+    且不会中止整个科研运行。
     """
 
     records: list[FullTextRecord] = []
@@ -431,7 +430,7 @@ def retrieve_full_text_for_payloads(
 def build_arxiv_pdf_url(arxiv_id: str) -> str:
     cleaned = arxiv_id.strip().removeprefix("arXiv:").removeprefix("https://arxiv.org/abs/")
     if not re.fullmatch(r"\d{4}\.\d{4,5}(v\d+)?", cleaned):
-        raise ValueError(f"unsupported or unsafe arXiv id for constructed PDF URL: {arxiv_id}")
+        raise ValueError(f"不支持或不安全的 arXiv ID，无法构造 PDF URL: {arxiv_id}")
     return f"https://arxiv.org/pdf/{cleaned}"
 
 
@@ -446,7 +445,7 @@ def retrieve_arxiv_pdf_artifact(
     source_url: str | None = None
     try:
         if not candidate.arxiv_id:
-            return _unavailable_record(candidate, "No arXiv ID is available for approved arXiv full-text retrieval.")
+            return _unavailable_record(candidate, "没有可用于获批 arXiv 全文检索的 arXiv ID。")
         source_url = build_arxiv_pdf_url(candidate.arxiv_id)
         payload = fetcher(
             source_url,
@@ -468,9 +467,9 @@ def retrieve_arxiv_pdf_artifact(
             char_count=0,
             sha256=hashlib.sha256(payload).hexdigest(),
             parser_limitations=(
-                "arXiv PDF bytes were retrieved from an allowlisted arXiv path; no dependency-free full-text PDF parsing is claimed.",
+                "arXiv PDF 字节来自 allowlist 中的 arXiv 路径；不声明已在无依赖条件下完成 PDF 全文解析。",
             ),
-            reason="Retrieved arXiv PDF artifact from constructed arXiv HTTPS URL.",
+            reason="已从构造的 arXiv HTTPS URL 获取 arXiv PDF 产物。",
         )
         return FullTextRecord(candidate, status)
     except Exception as exc:  # noqa: BLE001
@@ -503,7 +502,7 @@ def retrieve_semantic_scholar_snippets(
         )
         snippets = _parse_semantic_scholar_snippets(payload, candidate_id=candidate.semantic_scholar_id)
         if not snippets:
-            return _unavailable_record(candidate, "Semantic Scholar returned no body snippets for this record.")
+            return _unavailable_record(candidate, "Semantic Scholar 未返回该记录的正文片段。")
         text = "\n\n".join(snippets)
         truncated = len(text) > max_chars
         if truncated:
@@ -523,8 +522,8 @@ def retrieve_semantic_scholar_snippets(
             char_count=len(text),
             sha256=hashlib.sha256(encoded).hexdigest(),
             truncated=truncated,
-            parser_limitations=("Semantic Scholar snippets are API excerpts matched to the candidate when a paperId is available, not complete full text.",),
-            reason="Retrieved Semantic Scholar API snippets without following external openAccessPdf links.",
+            parser_limitations=("Semantic Scholar 片段是在 paperId 可用时与候选记录匹配的 API 摘录，并非完整全文。",),
+            reason="已获取 Semantic Scholar API 片段，未跟随外部 openAccessPdf 链接。",
         )
         return FullTextRecord(candidate, status, text[:500])
     except Exception as exc:  # noqa: BLE001
@@ -550,10 +549,10 @@ def _abstract_record(
     attempts: tuple[FullTextStatus, ...] = (),
 ) -> FullTextRecord:
     text = _collapse_whitespace(candidate.abstract or "")
-    limitations = ["Provider abstract/metadata only; no approved full-text body was retrieved for this record."]
+    limitations = ["仅提供器摘要/元数据；该记录没有检索到获批全文正文。"]
     if attempts:
         limitations.append(
-            "One or more approved route attempts did not yield body evidence; see attempts for per-route status."
+            "一个或多个获批路径尝试未产生正文证据；逐路径状态见 attempts。"
         )
     status = FullTextStatus(
         provider=candidate.provider,
@@ -564,7 +563,7 @@ def _abstract_record(
         parser="provider_metadata_abstract",
         char_count=len(text),
         parser_limitations=tuple(limitations),
-        reason=reason or "No approved full-text route succeeded; using abstract evidence scope.",
+        reason=reason or "没有获批全文路径成功；使用摘要证据范围。",
     )
     return FullTextRecord(candidate, status, text[:500], attempts)
 
@@ -622,7 +621,7 @@ def _semantic_scholar_snippet_paper_id(item: Mapping[str, Any]) -> str | None:
 
 
 def _write_bytes(path: Path, payload: bytes, safety: SafetyGate) -> None:
-    safety.assert_allowed(OperationClass.WRITE_DERIVED_OUTPUT, path, "write derived binary artifact")
+    safety.assert_allowed(OperationClass.WRITE_DERIVED_OUTPUT, path, "写入派生二进制产物")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
 

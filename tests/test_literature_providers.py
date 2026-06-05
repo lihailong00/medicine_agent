@@ -94,7 +94,7 @@ class LiteratureProviderTests(unittest.TestCase):
         self.assertIn(result.papers[0].stable_id, result.statuses[0].result_ids)
         evidence = result.evidence_records()[0]
         self.assertEqual(evidence.provider, "pubmed")
-        self.assertIn("Metadata/abstract", evidence.evidence_note)
+        self.assertIn("元数据/摘要", evidence.evidence_note)
 
     def test_live_mode_is_explicit_and_does_not_call_network_by_default(self):
         with patch("medicine_agent.literature.providers._fetch_url") as mocked_fetch:

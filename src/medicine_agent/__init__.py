@@ -1,4 +1,4 @@
-"""Medicine research agent core package."""
+"""医学与生信科研 agent 核心包。"""
 
 __all__ = ["__version__"]
 

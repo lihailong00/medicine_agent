@@ -1,10 +1,8 @@
 # Medicine Agent
 
-Offline-first CLI/library prototype for a bioinformatics scientific research agent.
-Live literature retrieval is available only through an explicit flag and is
-hard-restricted to PubMed/NCBI E-utilities, arXiv API, and Semantic Scholar API.
+离线优先的生信科研 agent CLI/库原型。真实文献检索只能通过显式参数开启，并且严格限制到 PubMed/NCBI E-utilities、arXiv API 与 Semantic Scholar API。
 
-## Run
+## 运行
 
 ```bash
 python -m medicine_agent.cli run \
@@ -14,11 +12,9 @@ python -m medicine_agent.cli run \
   --offline
 ```
 
-The default/offline pass is deterministic and requires no API keys or new
-dependencies. Original `data/` files are read-only inputs; derived
-reports/manifests/tables are written under the chosen output directory.
+默认/离线流程是确定性的，不需要 API key，也不会安装新依赖。原始 `data/` 文件只作为只读输入；派生的报告、manifest 与表格会写入你指定的输出目录。
 
-For real network literature retrieval, opt in explicitly:
+如需真实联网文献检索，请显式开启：
 
 ```bash
 PYTHONPATH=src python -m medicine_agent.cli run \
@@ -28,14 +24,13 @@ PYTHONPATH=src python -m medicine_agent.cli run \
   --live-api
 ```
 
-`--live-api` performs real HTTPS calls only to:
+`--live-api` 只会对以下地址发起真实 HTTPS 请求：
 
-- `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/` for PubMed/NCBI ESearch and EFetch
-- `https://export.arxiv.org/api/query` for arXiv
-- `https://api.semanticscholar.org/graph/v1/paper/search` for Semantic Scholar
+- `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/`：用于 PubMed/NCBI ESearch 与 EFetch
+- `https://export.arxiv.org/api/query`：用于 arXiv
+- `https://api.semanticscholar.org/graph/v1/paper/search`：用于 Semantic Scholar
 
-To request approved full-text evidence after live metadata search, add
-`--full-text`:
+如需在实时元数据检索后尝试获取获批路径上的全文证据，请增加 `--full-text`：
 
 ```bash
 PYTHONPATH=src python -m medicine_agent.cli run \
@@ -46,25 +41,21 @@ PYTHONPATH=src python -m medicine_agent.cli run \
   --full-text
 ```
 
-`--full-text` requires `--live-api` and cannot be combined with `--offline`.
-It still uses only approved source routes:
+`--full-text` 必须与 `--live-api` 一起使用，且不能与 `--offline` 同时使用。它仍然只使用获批来源路径：
 
-- NCBI E-utilities PubMed→PMC ELink and PMC EFetch XML when a PMCID/PMC link is available
-- Constructed `https://arxiv.org/pdf/<arxiv-id>` PDF artifact URLs for arXiv records
-- `https://api.semanticscholar.org/graph/v1/snippet/search` snippets for Semantic Scholar records
+- 当存在 PMCID/PMC 链接时，通过 NCBI E-utilities PubMed→PMC ELink 与 PMC EFetch XML 获取文本
+- 对 arXiv 记录构造 `https://arxiv.org/pdf/<arxiv-id>` PDF 产物 URL
+- 对 Semantic Scholar 记录使用 `https://api.semanticscholar.org/graph/v1/snippet/search` 片段接口
 
-The agent writes `artifacts/full_text_results.json` plus per-paper text/PDF
-artifacts where retrieval succeeds. arXiv PDFs are saved as audit artifacts but
-are not parsed as dependency-free full text.
+agent 会写出 `artifacts/full_text_results.json`，并在检索成功时写出逐篇论文的文本/PDF 产物。arXiv PDF 会作为审计产物保存，但不会在无额外依赖的前提下解析为全文文本。
 
-`--offline` always forces fixture mode and prevents live calls, even if
-`--live-api` is also present.
+`--offline` 始终强制 fixture 模式并阻止真实网络调用，即使同时传入了 `--live-api`。
 
-## Safety and Evidence Policy
+## 安全与证据策略
 
-- All side-effectful actions pass through `SafetyGate`.
-- Network calls are allowed only for PubMed/NCBI, arXiv, and Semantic Scholar API hosts; all other hosts are blocked.
-- Full-text retrieval never follows publisher or arbitrary `openAccessPdf` URLs.
-- Dependency install, API key use, long jobs, script execution, and overwrites require confirmation in non-interactive mode.
-- Biomedical output is research-only and not clinical decision support.
-- Synthesis claims must carry a `ClaimStatus` and evidence references unless explicitly labeled as a hypothesis or out-of-scope clinical refusal.
+- 所有有副作用的动作都必须经过 `SafetyGate`。
+- 网络调用只允许访问 PubMed/NCBI、arXiv 与 Semantic Scholar API 主机；其他主机全部阻断。
+- 全文检索绝不跟随出版社链接或任意 `openAccessPdf` URL。
+- 依赖安装、API key 使用、长任务、脚本执行与覆盖写入在非交互模式下都需要确认。
+- 生物医学输出仅限科研用途，不是临床决策支持。
+- 综合性主张必须带有 `ClaimStatus` 与证据引用，除非明确标记为假设或超出范围的临床拒答。

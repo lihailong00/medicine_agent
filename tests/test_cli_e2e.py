@@ -19,8 +19,8 @@ def test_cli_offline_e2e_generates_required_artifacts_without_mutating_data(tmp_
     for key in ["report_path", "manifest_path", "artifact_manifest_path", "search_log_path"]:
         assert Path(result[key]).exists(), key
     report = Path(result["report_path"]).read_text(encoding="utf-8")
-    assert "Research-only safety statement" in report
-    assert "Evidence Table" in report
+    assert "仅限科研的安全声明" in report
+    assert "证据表" in report
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["source_statuses"]
     assert manifest["data_files"]
@@ -217,7 +217,7 @@ def test_orchestrator_full_text_writes_manifest_and_report(monkeypatch, tmp_path
     assert manifest["request"]["full_text"] is True
     assert manifest["full_text_results"]["records"][0]["status"]["scope"] == "full_text_xml"
     report = Path(result["report_path"]).read_text(encoding="utf-8")
-    assert "Full-text Retrieval Summary" in report
+    assert "全文检索摘要" in report
     assert "full_text_xml" in report
 
 
@@ -235,6 +235,6 @@ def test_orchestrator_report_explains_full_text_safety_skip(tmp_path):
 
     report = Path(result["report_path"]).read_text(encoding="utf-8")
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
-    assert "Full-text retrieval was requested but not run" in report
+    assert "已请求全文检索但未运行" in report
     assert manifest["full_text_results"]["requested"] is True
     assert manifest["full_text_results"]["enabled"] is False

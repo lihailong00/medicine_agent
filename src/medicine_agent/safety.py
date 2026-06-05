@@ -1,4 +1,4 @@
-"""SafetyGate for research-only, non-destructive bioinformatics workflows."""
+"""面向仅科研、非破坏性生信工作流的 SafetyGate。"""
 
 from __future__ import annotations
 
@@ -9,15 +9,15 @@ from medicine_agent.models import OperationClass, SafetyDecision, SafetyDecision
 from medicine_agent.network_policy import ALLOWED_LIVE_HOSTS as NETWORK_ALLOWED_LIVE_HOSTS
 from medicine_agent.network_policy import classify_allowed_url
 
-# Compatibility alias used by the LIANA lane tests and artifacts.
+# LIANA 通道测试与产物使用的兼容别名。
 SafetyStatus = SafetyDecisionStatus
 ALLOWED_LIVE_HOSTS = NETWORK_ALLOWED_LIVE_HOSTS
 
 
 class SafetyGate:
-    """Central chokepoint for reads, generated-output writes, and risky actions.
+    """读取、派生输出写入与高风险动作的集中检查点。
 
-    The constructor accepts both historical call styles used by the team lanes:
+    构造函数同时兼容团队通道历史上使用过的两种调用方式：
     ``SafetyGate(data_dir, output_dir)`` and
     ``SafetyGate(output_dir=..., data_dir=...)``.
     """
@@ -52,7 +52,7 @@ class SafetyGate:
                 if self.data_dir is None or (target_path is not None and _is_relative_to(target_path.resolve(), self.data_dir))
                 else SafetyDecisionStatus.NEEDS_CONFIRMATION
             )
-            decision_rationale = rationale if status == SafetyDecisionStatus.ALLOWED else "read target is outside configured data directory"
+            decision_rationale = rationale if status == SafetyDecisionStatus.ALLOWED else "读取目标位于配置的数据目录之外"
         elif op == OperationClass.WRITE_DERIVED_OUTPUT:
             status = (
                 SafetyDecisionStatus.ALLOWED
@@ -62,7 +62,7 @@ class SafetyGate:
             decision_rationale = (
                 rationale
                 if status == SafetyDecisionStatus.ALLOWED
-                else "derived artifact writes must stay inside the generated output directory"
+                else "派生产物写入必须位于生成输出目录内"
             )
         elif op == OperationClass.NETWORK_CALL:
             url_decision = classify_allowed_url(str(target))
@@ -74,7 +74,7 @@ class SafetyGate:
             )
         elif op == OperationClass.OVERWRITE_INPUT:
             status = SafetyDecisionStatus.NEEDS_CONFIRMATION
-            decision_rationale = "overwriting input data requires explicit confirmation"
+            decision_rationale = "覆盖输入数据需要显式确认"
         elif op in {
             OperationClass.RUN_SCRIPT,
             OperationClass.INSTALL_DEP,
@@ -82,10 +82,10 @@ class SafetyGate:
             OperationClass.LONG_JOB,
         }:
             status = SafetyDecisionStatus.NEEDS_CONFIRMATION
-            decision_rationale = f"{op.value} requires explicit confirmation in research-only non-interactive mode"
-        else:  # pragma: no cover - defensive for future enum expansion.
+            decision_rationale = f"{op.value} 在仅科研的非交互模式下需要显式确认"
+        else:  # pragma: no cover - 为未来枚举扩展保留的防御分支。
             status = SafetyDecisionStatus.NEEDS_CONFIRMATION
-            decision_rationale = "unknown operation requires explicit confirmation"
+            decision_rationale = "未知操作需要显式确认"
 
         decision = SafetyDecision(operation=op, target=target_text, status=status, rationale=decision_rationale)
         self.decisions.append(decision)
@@ -98,13 +98,13 @@ class SafetyGate:
         return decision
 
     def allow_read_file(self, path: str | Path) -> SafetyDecision:
-        return self.decide(OperationClass.READ_FILE, path, "read-only inspection is allowed")
+        return self.decide(OperationClass.READ_FILE, path, "允许只读检查")
 
     def allow_write_derived_output(self, path: str | Path) -> SafetyDecision:
-        return self.decide(OperationClass.WRITE_DERIVED_OUTPUT, path, "write derived output artifact")
+        return self.decide(OperationClass.WRITE_DERIVED_OUTPUT, path, "写入派生输出产物")
 
     def allow_network_call(self, url: str) -> SafetyDecision:
-        return self.decide(OperationClass.NETWORK_CALL, url, "live literature API request to an allowlisted provider")
+        return self.decide(OperationClass.NETWORK_CALL, url, "向 allowlist 中的提供器发起实时文献 API 请求")
 
     def needs_confirmation(self, operation: OperationClass | str, target: str | Path, rationale: str) -> SafetyDecision:
         op = _coerce_operation(operation)
@@ -118,7 +118,7 @@ class SafetyGate:
         return decision
 
     def screen_question(self, question: str) -> SafetyDecision | None:
-        """Reject clinical-care questions while allowing research framing."""
+        """拒绝临床照护问题，同时允许科研表述。"""
 
         normalized = " ".join(question.lower().split())
         clinical_markers = {
@@ -138,8 +138,7 @@ class SafetyGate:
                 target=question,
                 status=SafetyDecisionStatus.BLOCKED,
                 rationale=(
-                    "clinical decision support is out of scope; reframe as research-only "
-                    "mechanism, literature, or exploratory data analysis"
+                    "临床决策支持超出范围；请改写为仅科研的机制、文献或探索性数据分析问题"
                 ),
             )
             self.decisions.append(decision)

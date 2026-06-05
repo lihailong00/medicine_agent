@@ -31,15 +31,14 @@ def utc_now() -> str:
 
 
 def run_research(request: ResearchRequest) -> dict[str, Any]:
-    """Run the offline-first research workflow and write generated artifacts."""
+    """运行离线优先科研工作流，并写入生成产物。"""
 
     start = utc_now()
     output_dir = request.output_dir
     safety = SafetyGate(data_dir=request.data_dir, output_dir=output_dir, non_interactive=True)
     clinical_decision = safety.screen_question(request.question)
 
-    # Directory creation is constrained by all later writes going through
-    # SafetyGate; no input path is ever overwritten.
+    # 目录创建之后的所有写入都受 SafetyGate 约束；任何输入路径都不会被覆盖。
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir = output_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -120,7 +119,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         evidence.insert(
             0,
             EvidenceItem(
-                claim="Clinical/diagnostic/treatment request was refused as out of scope and reframed as research-only.",
+                claim="临床/诊断/治疗请求因超出范围而被拒绝，并被重述为仅科研问题。",
                 status="out_of_scope_clinical",
                 limitations=[clinical_decision.rationale],
             ),
@@ -207,7 +206,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
 
 
 def _write_top_interactions_csv(path: Path, rows: list[dict[str, Any]], safety: SafetyGate) -> None:
-    safety.assert_allowed(OperationClass.WRITE_DERIVED_OUTPUT, path, "write derived LIANA top interactions table")
+    safety.assert_allowed(OperationClass.WRITE_DERIVED_OUTPUT, path, "写入派生 LIANA Top 互作表")
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = ["source_file", "row_index", "source_cell", "target_cell", "ligand", "receptor", "pvalue", "lr_mean"]
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -267,11 +266,11 @@ def _to_jsonable_liana_summary(summary: Any) -> dict[str, Any]:
 
 def _full_text_disabled_reason(request: ResearchRequest, clinical_decision: object | None) -> str:
     if clinical_decision is not None:
-        return "Clinical safety screen skipped literature and full-text retrieval."
+        return "临床安全筛查已跳过文献与全文检索。"
     if not request.full_text:
-        return "Full-text retrieval was not requested."
+        return "未请求全文检索。"
     if request.offline:
-        return "Full-text retrieval requires live API mode and is disabled in offline mode."
+        return "全文检索需要实时 API 模式，在离线模式下已禁用。"
     if not request.live_api:
-        return "Full-text retrieval requires --live-api."
-    return "Full-text retrieval disabled."
+        return "全文检索需要 --live-api。"
+    return "全文检索已禁用。"

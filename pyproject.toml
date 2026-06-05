@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "medicine-agent"
 version = "0.1.0"
-description = "Offline-first bioinformatics scientific research agent"
+description = "离线优先的生信科研 agent"
 requires-python = ">=3.11"
 dependencies = []
 

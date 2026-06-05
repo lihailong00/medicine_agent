@@ -63,9 +63,9 @@ class ResearchRequest:
 
     def __post_init__(self) -> None:
         if not self.question or not self.question.strip():
-            raise ValueError("question is required")
+            raise ValueError("必须提供科研问题")
         if self.full_text and (self.offline or not self.live_api):
-            raise ValueError("full_text requires live_api=True and offline=False")
+            raise ValueError("full_text 需要 live_api=True 且 offline=False")
         object.__setattr__(self, "data_dir", Path(self.data_dir))
         object.__setattr__(self, "output_dir", Path(self.output_dir))
 
@@ -157,9 +157,9 @@ class EvidenceItem:
 
     def __post_init__(self) -> None:
         if not self.claim.strip():
-            raise ValueError("EvidenceItem claim is required")
+            raise ValueError("EvidenceItem 必须包含主张文本")
         if self.status not in {"hypothesis", "out_of_scope_clinical"} and not self.evidence_refs:
-            raise ValueError("supported/conflicting claims require evidence references")
+            raise ValueError("受支持或存在冲突的主张必须包含证据引用")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

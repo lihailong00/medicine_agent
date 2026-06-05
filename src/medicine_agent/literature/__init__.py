@@ -1,4 +1,4 @@
-"""Literature provider abstractions for offline-first research workflows."""
+"""离线优先科研工作流的文献提供器抽象。"""
 
 from .base import (
     CitationEvidenceRecord,

@@ -1,8 +1,7 @@
-"""Contracts shared by literature providers.
+"""文献提供器共享的契约。
 
-The first implementation is deliberately stdlib-only and offline/mock-first.
-Provider network calls are represented by explicit SourceStatus records and are
-never attempted unless a caller opts in with an explicit live flag.
+首版实现刻意只使用标准库，并以离线/模拟优先。提供器网络调用必须通过显式
+SourceStatus 记录呈现；除非调用方显式开启 live 标志，否则绝不尝试联网。
 """
 
 from __future__ import annotations
@@ -14,7 +13,7 @@ from typing import Mapping, Protocol, Sequence
 
 
 class SourceStatusValue(str, Enum):
-    """Observable status for every provider/query attempt."""
+    """每次提供器/查询尝试的可观测状态。"""
 
     ATTEMPTED = "attempted"
     SUCCEEDED = "succeeded"
@@ -25,14 +24,14 @@ class SourceStatusValue(str, Enum):
 
 
 def utc_now_iso() -> str:
-    """Return an ISO-8601 UTC timestamp with a stable Z suffix."""
+    """返回带稳定 Z 后缀的 ISO-8601 UTC 时间戳。"""
 
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 @dataclass(frozen=True)
 class SourceStatus:
-    """Provider observability record required by the PRD search log contract."""
+    """PRD 检索日志契约要求的提供器可观测记录。"""
 
     provider: str
     endpoint_family: str
@@ -60,7 +59,7 @@ class SourceStatus:
 
 @dataclass(frozen=True)
 class SearchQueryRecord:
-    """A decomposed provider-specific literature query."""
+    """分解后的、面向特定提供器的文献查询。"""
 
     provider: str
     query: str
@@ -78,7 +77,7 @@ class SearchQueryRecord:
 
 @dataclass(frozen=True)
 class QueryDecomposition:
-    """Search plan derived from a research question."""
+    """由科研问题派生出的检索计划。"""
 
     question: str
     subquestions: tuple[str, ...]
@@ -94,7 +93,7 @@ class QueryDecomposition:
 
 @dataclass(frozen=True)
 class PaperRecord:
-    """Normalized metadata contract across PubMed/PMC, arXiv, and Semantic Scholar."""
+    """跨 PubMed/PMC、arXiv 与 Semantic Scholar 的规范化元数据契约。"""
 
     provider: str
     title: str
@@ -146,7 +145,7 @@ class PaperRecord:
 
 @dataclass(frozen=True)
 class CitationEvidenceRecord:
-    """Citation-safe evidence record for research-only report synthesis."""
+    """用于仅科研报告综合的引用安全证据记录。"""
 
     paper_id: str
     provider: str
@@ -166,7 +165,7 @@ class CitationEvidenceRecord:
 
 @dataclass(frozen=True)
 class ProviderSearchResult:
-    """Result bundle from a provider query."""
+    """提供器查询返回的结果包。"""
 
     provider: str
     query: str
@@ -179,7 +178,7 @@ class ProviderSearchResult:
                 paper_id=paper.stable_id,
                 provider=paper.provider,
                 citation_label=_citation_label(paper),
-                evidence_note="Metadata/abstract evidence only; full-text access is not assumed.",
+                evidence_note="仅为元数据/摘要证据；不假定已获得全文访问。",
                 source_url=paper.source_url,
             )
             for paper in self.papers
@@ -196,17 +195,16 @@ class ProviderSearchResult:
 
 
 class LiteratureProvider(Protocol):
-    """Protocol implemented by all literature source adapters."""
+    """所有文献来源适配器实现的协议。"""
 
     provider_name: str
     endpoint_family: str
 
     def search(self, query: str, *, allow_live: bool = False) -> ProviderSearchResult:
-        """Search literature for ``query``.
+        """针对 ``query`` 检索文献。
 
-        Implementations must be deterministic and offline by default. If live
-        mode is unavailable or not explicitly allowed, they must return a
-        SourceStatus record instead of silently omitting the provider.
+        实现默认必须是确定性的离线行为。如果 live 模式不可用或未被显式允许，
+        必须返回 SourceStatus 记录，而不是静默省略该提供器。
         """
 
 
@@ -221,12 +219,12 @@ def _citation_label(paper: PaperRecord) -> str:
 
 
 def merge_search_logs(results: Sequence[ProviderSearchResult]) -> list[dict[str, object]]:
-    """Flatten provider statuses into a serializable search log."""
+    """将提供器状态展平成可序列化的检索日志。"""
 
     return [status.to_dict() for result in results for status in result.statuses]
 
 
 def records_to_jsonable(records: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
-    """Normalize mapping sequences for manifest/report writers."""
+    """为 manifest/报告写入器规范化映射序列。"""
 
     return [dict(record) for record in records]

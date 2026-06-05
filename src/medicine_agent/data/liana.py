@@ -1,4 +1,4 @@
-"""Stdlib-only CSV/LIANA ingestion, profiling, ranking, and provenance."""
+"""仅用标准库实现的 CSV/LIANA 摄取、画像、排序与溯源。"""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ RANKING_COLUMNS = ("pvalue", "lr.mean")
 
 @dataclass(frozen=True)
 class ParserStatus:
-    """Status for a discovered input parser."""
+    """已发现输入解析器的状态。"""
 
     status: str
     file_type: str
@@ -45,7 +45,7 @@ class ParserStatus:
 
 @dataclass(frozen=True)
 class ColumnProfile:
-    """Simple schema profile for one column."""
+    """单列的简要 schema 画像。"""
 
     name: str
     present_count: int = 0
@@ -59,7 +59,7 @@ class ColumnProfile:
 
 @dataclass(frozen=True)
 class DataFileRecord:
-    """Discovered data file and parser/schema metadata."""
+    """已发现数据文件及其解析器/schema 元数据。"""
 
     path: str
     file_type: str
@@ -74,7 +74,7 @@ class DataFileRecord:
 
 @dataclass(frozen=True)
 class LianaInteraction:
-    """Rankable LIANA interaction with source row provenance."""
+    """带源行溯源、可排序的 LIANA 互作。"""
 
     source: str
     target: str
@@ -90,7 +90,7 @@ class LianaInteraction:
 
 @dataclass(frozen=True)
 class LianaSummary:
-    """Complete data-lane summary for serialization and reporting."""
+    """用于序列化与报告的数据通道完整摘要。"""
 
     generated_at: str
     input_dir: str
@@ -102,7 +102,7 @@ class LianaSummary:
 
 
 def discover_data_files(data_dir: str | Path) -> list[Path]:
-    """Return deterministic supported/placeholder input file candidates."""
+    """返回确定性的受支持/占位输入文件候选。"""
 
     root = Path(data_dir)
     suffixes = {".csv", ".tsv", ".xlsx", ".xls", ".docx", ".doc"}
@@ -110,10 +110,10 @@ def discover_data_files(data_dir: str | Path) -> list[Path]:
 
 
 def summarize_liana_files(data_dir: str | Path, *, top_n: int = 50, safety_gate: SafetyGate | None = None) -> LianaSummary:
-    """Discover data files, profile CSVs, and rank LIANA interactions.
+    """发现数据文件、画像 CSV，并对 LIANA 互作排序。
 
-    Excel and Word files are represented as actionable parser placeholders when
-    optional parsers are unavailable; no dependency is installed or required.
+    当可选解析器不可用时，Excel 与 Word 文件会被表示为可操作的解析器占位记录；
+    不会安装或要求任何依赖。
     """
 
     data_root = Path(data_dir).resolve()
@@ -126,19 +126,19 @@ def summarize_liana_files(data_dir: str | Path, *, top_n: int = 50, safety_gate:
     for path in discover_data_files(data_root):
         read_decision = gate.allow_read_file(path)
         if read_decision.status != SafetyStatus.ALLOWED:
-            warning = f"Read skipped for {path}: {read_decision.rationale}"
+            warning = f"已跳过读取 {path}: {read_decision.rationale}"
             warnings.append(warning)
             records.append(_placeholder_record(path, "blocked", warning))
             continue
 
         suffix = path.suffix.lower()
         if suffix in {".xlsx", ".xls"}:
-            reason = "Excel parsing requires an optional parser dependency; CSV path remains available."
+            reason = "Excel 解析需要可选解析依赖；CSV 路径仍然可用。"
             records.append(_placeholder_record(path, "unsupported_optional_dependency", reason, file_type="excel"))
             warnings.append(f"{path}: {reason}")
             continue
         if suffix in {".docx", ".doc"}:
-            reason = "Word parsing requires an optional parser dependency; CSV path remains available."
+            reason = "Word 解析需要可选解析依赖；CSV 路径仍然可用。"
             records.append(_placeholder_record(path, "unsupported_optional_dependency", reason, file_type="word"))
             warnings.append(f"{path}: {reason}")
             continue
@@ -162,7 +162,7 @@ def summarize_liana_files(data_dir: str | Path, *, top_n: int = 50, safety_gate:
 
 
 def process_data_dir(data_dir: str | Path, output_dir: str | Path, *, top_n: int = 50) -> dict[str, Path]:
-    """Process data and write JSON/Markdown artifacts under output_dir only."""
+    """处理数据，并且只在 output_dir 下写入 JSON/Markdown 产物。"""
 
     data_root = Path(data_dir).resolve()
     output_root = Path(output_dir).resolve()
@@ -176,8 +176,7 @@ def process_data_dir(data_dir: str | Path, output_dir: str | Path, *, top_n: int
         "liana_summary": output_root / "liana_summary.md",
     }
 
-    # Record write approvals before serializing the manifest so provenance shows
-    # every generated-output side effect for the run.
+    # 在序列化 manifest 前记录写入审批，确保溯源包含本次运行的每个派生输出副作用。
     for path in artifacts.values():
         _assert_write_allowed(path, gate)
 
@@ -188,19 +187,19 @@ def process_data_dir(data_dir: str | Path, output_dir: str | Path, *, top_n: int
 
 
 def render_markdown_summary(summary: LianaSummary) -> str:
-    """Render a concise research-only LIANA summary."""
+    """渲染简洁的仅科研 LIANA 摘要。"""
 
     lines = [
-        "# LIANA Data Processing Summary",
+        "# LIANA 数据处理摘要",
         "",
-        "Research-only artifact: this summary supports biological research interpretation only and is not diagnostic or therapeutic advice.",
+        "仅科研产物：本摘要只支持生物学科研解读，不是诊断或治疗建议。",
         "",
-        f"Generated at: `{summary.generated_at}`",
-        f"Input directory: `{summary.input_dir}`",
+        f"生成时间: `{summary.generated_at}`",
+        f"输入目录: `{summary.input_dir}`",
         "",
-        "## Input files",
+        "## 输入文件",
         "",
-        "| File | Type | Parser status | Rows | Columns | Warnings |",
+        "| 文件 | 类型 | 解析状态 | 行数 | 列数 | 警告 |",
         "| --- | --- | --- | ---: | ---: | --- |",
     ]
     for record in summary.files:
@@ -217,12 +216,12 @@ def render_markdown_summary(summary: LianaSummary) -> str:
 
     lines.extend([
         "",
-        "## Top ranked LIANA interactions",
+        "## LIANA 互作排序 Top 列表",
         "",
-        "Ranking: valid numeric `pvalue` ascending, then valid numeric `lr.mean` descending, then stable file/source/target/ligand/receptor tie-breakers.",
-        "Rows with missing or invalid ranking values are excluded from this top list and counted in the unranked bucket.",
+        "排序：有效数值 `pvalue` 升序，其次有效数值 `lr.mean` 降序，再使用稳定的文件/source/target/ligand/receptor 规则打破并列。",
+        "缺失或无效排序值的行会从 Top 列表排除，并计入未排序分桶。",
         "",
-        "| Rank | Source | Target | Ligand | Receptor | pvalue | lr.mean | Provenance |",
+        "| 排名 | 来源细胞 | 目标细胞 | 配体 | 受体 | pvalue | lr.mean | 溯源 |",
         "| ---: | --- | --- | --- | --- | ---: | ---: | --- |",
     ])
     for rank, interaction in enumerate(summary.ranked_interactions, start=1):
@@ -230,23 +229,23 @@ def render_markdown_summary(summary: LianaSummary) -> str:
         lines.append(
             f"| {rank} | {interaction.source} | {interaction.target} | {interaction.ligand} | "
             f"{interaction.receptor} | {interaction.pvalue:.6g} | {interaction.lr_mean:.6g} | "
-            f"{prov['file']} row {prov['csv_row_number']} |"
+            f"{prov['file']} 第 {prov['csv_row_number']} 行 |"
         )
 
     source_target_counts = Counter((item.source, item.target) for item in summary.ranked_interactions)
-    lines.extend(["", "## Ranked source/target pair counts", ""])
+    lines.extend(["", "## 已排序 source/target 配对计数", ""])
     if source_target_counts:
         for (source, target), count in source_target_counts.most_common():
             lines.append(f"- `{source}` → `{target}`: {count}")
     else:
-        lines.append("- No rankable LIANA interactions found.")
+        lines.append("- 未发现可排序的 LIANA 互作。")
 
-    lines.extend(["", "## Warnings", ""])
+    lines.extend(["", "## 警告", ""])
     if summary.warnings:
         lines.extend(f"- {warning}" for warning in summary.warnings)
     else:
-        lines.append("- None")
-    lines.append(f"- Unranked rows due to missing/invalid ranking values: {len(summary.unranked_rows)}")
+        lines.append("- 无")
+    lines.append(f"- 因排序值缺失/无效而未排序的行数: {len(summary.unranked_rows)}")
     lines.append("")
     return "\n".join(lines)
 
@@ -263,12 +262,12 @@ def _read_csv_file(path: Path, data_root: Path) -> tuple[DataFileRecord, list[Li
     profile = _profile_rows(columns, rows)
     missing_required = [column for column in LIANA_REQUIRED_COLUMNS if column not in columns]
     if missing_required:
-        warnings.append("missing LIANA required columns: " + ", ".join(missing_required))
+        warnings.append("缺少 LIANA 必需列: " + ", ".join(missing_required))
     is_liana = not missing_required
 
     if is_liana:
         for data_row_index, row in enumerate(rows):
-            csv_row_number = data_row_index + 2  # header is row 1
+            csv_row_number = data_row_index + 2  # 表头是第 1 行
             pvalue = _coerce_float(row.get("pvalue"))
             lr_mean = _coerce_float(row.get("lr.mean"))
             provenance = {
@@ -309,7 +308,7 @@ def _read_csv_file(path: Path, data_root: Path) -> tuple[DataFileRecord, list[Li
     record = DataFileRecord(
         path=str(path),
         file_type="csv",
-        parser_status=ParserStatus("parsed_liana_csv" if is_liana else "parsed_csv", "csv", "LIANA schema detected" if is_liana else "generic CSV parsed"),
+        parser_status=ParserStatus("parsed_liana_csv" if is_liana else "parsed_csv", "csv", "检测到 LIANA schema" if is_liana else "已解析通用 CSV"),
         row_count=len(rows),
         columns=columns,
         schema_profile=profile,
@@ -457,13 +456,11 @@ def _to_jsonable(value: Any) -> Any:
 
 
 def summarize_liana(records: list[Any], safety_gate: SafetyGate, *, top_n: int = 50) -> dict[str, Any]:
-    """Compatibility wrapper for the coordinator-level LIANA contract.
+    """面向协调器级 LIANA 契约的兼容包装器。
 
-    Early team lanes used ``discover_data_files(...)->records`` followed by a
-    dict-returning ``summarize_liana``. The data lane later introduced the
-    richer ``summarize_liana_files`` dataclass API. Keeping this wrapper avoids
-    duplicate parsing code while preserving deterministic ranking/provenance for
-    older orchestrator/tests.
+    早期团队通道使用 ``discover_data_files(...)->records``，随后调用返回 dict 的
+    ``summarize_liana``。数据通道后来引入了信息更丰富的 ``summarize_liana_files``
+    dataclass API。保留该包装器可以避免重复解析代码，同时为旧版协调器/测试保留确定性的排序与溯源。
     """
 
     paths = [Path(record.path) for record in records if getattr(record, "file_type", "") == "csv"]
@@ -477,7 +474,7 @@ def summarize_liana(records: list[Any], safety_gate: SafetyGate, *, top_n: int =
 
     top_interactions = [_legacy_interaction_dict(item) for item in summary.ranked_interactions]
     return {
-        "ranking_method": "pvalue ascending, lr.mean descending, stable file/source/target/ligand/receptor tie-breakers",
+        "ranking_method": "pvalue 升序、lr.mean 降序，并使用稳定的 file/source/target/ligand/receptor 规则打破并列",
         "top_interactions": top_interactions,
         "unranked_interactions": [
             {
@@ -510,11 +507,11 @@ def _legacy_interaction_dict(interaction: LianaInteraction) -> dict[str, Any]:
 
 
 def main(argv: Iterable[str] | None = None) -> int:
-    """Small CLI for data-lane artifact generation."""
+    """用于生成数据通道产物的小型 CLI。"""
 
     import argparse
 
-    parser = argparse.ArgumentParser(description="Process CSV/LIANA data into generated research artifacts.")
+    parser = argparse.ArgumentParser(description="将 CSV/LIANA 数据处理为生成的科研产物。")
     parser.add_argument("--data-dir", default="data")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--top-n", type=int, default=50)

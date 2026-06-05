@@ -1,8 +1,7 @@
-"""Literature providers with offline fixtures and allowlisted live APIs.
+"""带离线 fixture 与 allowlist 实时 API 的文献提供器。
 
-Live mode is intentionally narrow: the only network destinations allowed by
-this module are NCBI/PubMed E-utilities, arXiv's Atom API, and Semantic
-Scholar's Graph API. No API key or non-stdlib dependency is required.
+live 模式刻意保持狭窄：本模块唯一允许的网络目的地是 NCBI/PubMed E-utilities、
+arXiv Atom API 与 Semantic Scholar Graph API。不需要 API key 或标准库之外的依赖。
 """
 
 from __future__ import annotations
@@ -48,7 +47,7 @@ class OfflineFixtureProvider:
             query=query,
             status=SourceStatusValue.SUCCEEDED,
             result_ids=tuple(paper.stable_id for paper in matches),
-            reason="deterministic offline fixture provider used; no network attempted",
+            reason="已使用确定性离线 fixture 提供器；未尝试网络调用",
         )
         return ProviderSearchResult(
             provider=self.provider_name,
@@ -69,7 +68,7 @@ class OfflineFixtureProvider:
             endpoint_family=self.endpoint_family,
             query=query,
             status=SourceStatusValue.FAILED,
-            reason="live search is not implemented for this provider",
+            reason="该提供器尚未实现 live 检索",
         )
         return ProviderSearchResult(self.provider_name, query, (), (status,))
 
@@ -111,7 +110,7 @@ class PubMedProvider(OfflineFixtureProvider):
                     self.provider_name,
                     self.endpoint_family,
                     query,
-                    "NCBI ESearch returned no PubMed IDs",
+                    "NCBI ESearch 未返回 PubMed ID",
                 )
 
             fetch_url = _build_pubmed_efetch_url(ids)
@@ -123,10 +122,10 @@ class PubMedProvider(OfflineFixtureProvider):
                 query=query,
                 status=SourceStatusValue.SUCCEEDED,
                 result_ids=tuple(paper.stable_id for paper in papers),
-                reason=f"live NCBI ESearch+EFetch completed for {len(papers)} PubMed records",
+                reason=f"实时 NCBI ESearch+EFetch 已完成，得到 {len(papers)} 条 PubMed 记录",
             )
             return ProviderSearchResult(self.provider_name, query, papers, (status,))
-        except Exception as exc:  # noqa: BLE001 - provider must degrade to SourceStatus.
+        except Exception as exc:  # noqa: BLE001 - 提供器必须降级为 SourceStatus。
             return _failed_result(self.provider_name, self.endpoint_family, query, exc)
 
 
@@ -161,7 +160,7 @@ class ArxivProvider(OfflineFixtureProvider):
                 query=query,
                 status=SourceStatusValue.SUCCEEDED,
                 result_ids=tuple(paper.stable_id for paper in papers),
-                reason=f"live arXiv API query completed for {len(papers)} records",
+                reason=f"实时 arXiv API 查询已完成，得到 {len(papers)} 条记录",
             )
             return ProviderSearchResult(self.provider_name, query, papers, (status,))
         except Exception as exc:  # noqa: BLE001
@@ -194,7 +193,7 @@ class SemanticScholarProvider(OfflineFixtureProvider):
                 query=query,
                 status=SourceStatusValue.SUCCEEDED,
                 result_ids=tuple(paper.stable_id for paper in papers),
-                reason=f"live Semantic Scholar Graph API query completed for {len(papers)} records",
+                reason=f"实时 Semantic Scholar Graph API 查询已完成，得到 {len(papers)} 条记录",
             )
             return ProviderSearchResult(self.provider_name, query, papers, (status,))
         except Exception as exc:  # noqa: BLE001
@@ -223,7 +222,7 @@ class LiteratureSearchCoordinator:
                     endpoint_family=query.endpoint_family,
                     query=query.query,
                     status=SourceStatusValue.SKIPPED,
-                    reason="provider is not configured or not in the allowed live-source set",
+                    reason="提供器未配置，或不在允许的实时来源集合中",
                 )
                 results.append(ProviderSearchResult(query.provider, query.query, (), (status,)))
                 continue
@@ -286,7 +285,7 @@ def _parse_pubmed_efetch(xml_payload: str) -> tuple[PaperRecord, ...]:
         if medline is None or article_node is None:
             continue
         pmid = _text(medline.find("PMID"))
-        title = _text(article_node.find("ArticleTitle")) or "Untitled PubMed record"
+        title = _text(article_node.find("ArticleTitle")) or "未命名 PubMed 记录"
         abstract = " ".join(
             part.strip()
             for part in (_element_text(node) for node in article_node.findall("Abstract/AbstractText"))
@@ -334,7 +333,7 @@ def _parse_arxiv_atom(xml_payload: str) -> tuple[PaperRecord, ...]:
         papers.append(
             PaperRecord(
                 provider="arxiv",
-                title=" ".join(_text(entry.find("atom:title", ns)).split()) or "Untitled arXiv record",
+                title=" ".join(_text(entry.find("atom:title", ns)).split()) or "未命名 arXiv 记录",
                 abstract=" ".join(_text(entry.find("atom:summary", ns)).split()) or None,
                 year=year,
                 venue="arXiv",
@@ -373,7 +372,7 @@ def _parse_semantic_scholar(payload: Mapping[str, object]) -> tuple[PaperRecord,
         papers.append(
             PaperRecord(
                 provider="semantic_scholar",
-                title=str(item_map.get("title") or "Untitled Semantic Scholar record"),
+                title=str(item_map.get("title") or "未命名 Semantic Scholar 记录"),
                 abstract=str(item_map.get("abstract")) if item_map.get("abstract") else None,
                 year=item_map.get("year") if isinstance(item_map.get("year"), int) else None,
                 venue=str(item_map.get("venue")) if item_map.get("venue") else "Semantic Scholar",

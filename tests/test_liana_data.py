@@ -67,7 +67,7 @@ class LianaDataTests(unittest.TestCase):
             summary = summarize_liana_files(data_dir)
 
             self.assertEqual(summary.ranked_interactions, [])
-            self.assertIn("missing LIANA required columns", summary.files[0].warnings[0])
+            self.assertIn("缺少 LIANA 必需列", summary.files[0].warnings[0])
 
     def test_process_writes_only_generated_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

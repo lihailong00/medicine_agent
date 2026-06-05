@@ -104,4 +104,4 @@ def test_clinical_question_is_blocked_as_out_of_scope(tmp_path):
     decision = gate.screen_question("How should I treat this patient?")
     assert decision is not None
     assert decision.status == SafetyDecisionStatus.BLOCKED
-    assert "out of scope" in decision.rationale
+    assert "超出范围" in decision.rationale

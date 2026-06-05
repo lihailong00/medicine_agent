@@ -1,4 +1,4 @@
-"""Shared live-network policy for allowlisted scholarly API access."""
+"""获批学术 API 访问共用的实时网络策略。"""
 
 from __future__ import annotations
 
@@ -34,23 +34,23 @@ class UrlPolicyDecision:
 def classify_allowed_url(url: str) -> UrlPolicyDecision:
     parsed = urlparse(url)
     if parsed.scheme != "https":
-        return UrlPolicyDecision(url, False, "blocked", "network calls require HTTPS")
+        return UrlPolicyDecision(url, False, "blocked", "网络调用必须使用 HTTPS")
     if parsed.netloc == "eutils.ncbi.nlm.nih.gov" and parsed.path.startswith("/entrez/eutils/"):
-        return UrlPolicyDecision(url, True, "ncbi_eutils", "NCBI E-utilities endpoint is allowlisted")
+        return UrlPolicyDecision(url, True, "ncbi_eutils", "NCBI E-utilities 端点已列入 allowlist")
     if parsed.netloc == "export.arxiv.org" and parsed.path == "/api/query":
-        return UrlPolicyDecision(url, True, "arxiv_atom", "arXiv Atom API endpoint is allowlisted")
+        return UrlPolicyDecision(url, True, "arxiv_atom", "arXiv Atom API 端点已列入 allowlist")
     if parsed.netloc == "api.semanticscholar.org" and parsed.path in {
         "/graph/v1/paper/search",
         "/graph/v1/snippet/search",
     }:
-        return UrlPolicyDecision(url, True, "s2_graph", "Semantic Scholar API endpoint is allowlisted")
+        return UrlPolicyDecision(url, True, "s2_graph", "Semantic Scholar API 端点已列入 allowlist")
     if parsed.netloc == "arxiv.org" and _is_allowlisted_arxiv_full_text_path(parsed.path):
-        return UrlPolicyDecision(url, True, "arxiv_full_text", "arXiv full-text endpoint is allowlisted")
+        return UrlPolicyDecision(url, True, "arxiv_full_text", "arXiv 全文端点已列入 allowlist")
     return UrlPolicyDecision(
         url,
         False,
         "blocked",
-        "network calls are restricted to PubMed/NCBI E-utilities, arXiv API/full-text paths, and Semantic Scholar API",
+        "网络调用仅限 PubMed/NCBI E-utilities、arXiv API/全文路径与 Semantic Scholar API",
     )
 
 
@@ -58,7 +58,7 @@ def assert_url_allowed(url: str) -> UrlPolicyDecision:
     decision = classify_allowed_url(url)
     if not decision.allowed:
         parsed = urlparse(url)
-        raise PermissionError(f"live literature request blocked by URL policy: {parsed.scheme}://{parsed.netloc}{parsed.path}")
+        raise PermissionError(f"实时文献请求被 URL 策略阻断: {parsed.scheme}://{parsed.netloc}{parsed.path}")
     return decision
 
 
@@ -67,7 +67,7 @@ def fetch_url_bytes(
     *,
     network_gate: Any | None = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
-    rationale: str = "live literature API request to allowlisted provider",
+    rationale: str = "向 allowlist 中的提供器发起实时文献 API 请求",
     max_bytes: int | None = None,
 ) -> bytes:
     assert_url_allowed(url)
@@ -92,7 +92,7 @@ def fetch_url_bytes(
 
 
 class AllowlistRedirectHandler(HTTPRedirectHandler):
-    """Redirect handler that blocks redirects outside the shared URL policy."""
+    """阻断共享 URL 策略之外跳转的重定向处理器。"""
 
     def redirect_request(self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Request | None:
         assert_url_allowed(newurl)
@@ -110,7 +110,7 @@ def _read_capped(response: Any, *, max_bytes: int | None) -> bytes:
             break
         total += len(chunk)
         if total > max_bytes:
-            raise ValueError(f"response exceeded configured byte cap ({max_bytes})")
+            raise ValueError(f"响应超过配置的字节上限 byte cap ({max_bytes})")
         chunks.append(chunk)
     return b"".join(chunks)
 

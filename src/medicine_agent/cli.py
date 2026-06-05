@@ -10,29 +10,29 @@ from .orchestrator import run_research
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="medicine-agent", description="Offline-first bioinformatics research agent")
+    parser = argparse.ArgumentParser(prog="medicine-agent", description="离线优先的生信科研 agent")
     sub = parser.add_subparsers(dest="command")
-    run = sub.add_parser("run", help="run a research workflow")
-    run.add_argument("--question", required=True, help="Research question")
-    run.add_argument("--data-dir", default="data", help="Input data directory (read-only)")
-    run.add_argument("--output-dir", default="generated/medicine_agent", help="Generated output directory")
+    run = sub.add_parser("run", help="运行科研工作流")
+    run.add_argument("--question", required=True, help="科研问题")
+    run.add_argument("--data-dir", default="data", help="输入数据目录（只读）")
+    run.add_argument("--output-dir", default="generated/medicine_agent", help="生成结果目录")
     run.add_argument(
         "--offline",
         action="store_true",
         default=False,
-        help="Force deterministic offline/mock providers; this is also the default unless --live-api is set",
+        help="强制使用确定性的离线/模拟提供器；除非设置 --live-api，否则默认也是离线模式",
     )
     run.add_argument(
         "--live-api",
         action="store_true",
-        help="Use real allowlisted PubMed/NCBI, arXiv, and Semantic Scholar API queries",
+        help="使用真实但受 allowlist 限制的 PubMed/NCBI、arXiv 与 Semantic Scholar API 查询",
     )
     run.add_argument(
         "--full-text",
         action="store_true",
-        help="After live metadata search, retrieve approved full-text/snippet artifacts where available",
+        help="在实时元数据检索后，尽可能获取获批路径上的全文/片段产物",
     )
-    run.add_argument("--include-preprints", action="store_true", help="Include preprint sources in source plan")
+    run.add_argument("--include-preprints", action="store_true", help="在来源计划中包含预印本来源")
     return parser
 
 
@@ -43,9 +43,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help(sys.stderr)
         return 2
     if args.full_text and not args.live_api:
-        parser.error("--full-text requires --live-api because full-text retrieval is a live-network operation")
+        parser.error("--full-text 需要 --live-api，因为全文检索属于实时网络操作")
     if args.full_text and args.offline:
-        parser.error("--full-text cannot be combined with --offline")
+        parser.error("--full-text 不能与 --offline 同时使用")
     try:
         result = run_research(ResearchRequest(
             question=args.question,
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
             full_text=args.full_text,
         ))
     except Exception as exc:
-        print(f"medicine-agent failed: {exc}", file=sys.stderr)
+        print(f"medicine-agent 执行失败: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

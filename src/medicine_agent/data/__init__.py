@@ -1,4 +1,4 @@
-"""Data ingestion and LIANA processing lane."""
+"""数据摄取与 LIANA 处理通道。"""
 
 __all__ = ["process_data_dir", "summarize_liana_files"]
 

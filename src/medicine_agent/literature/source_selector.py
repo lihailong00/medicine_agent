@@ -1,4 +1,4 @@
-"""Adaptive source selection for literature search plans."""
+"""文献检索计划的自适应来源选择。"""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ COMPUTATIONAL_TERMS = {
 
 
 def select_sources(question: str) -> tuple[str, ...]:
-    """Select source names for a question using deterministic keyword rules."""
+    """使用确定性关键词规则为问题选择来源名称。"""
 
     normalized = question.lower()
     selected: list[str] = []
@@ -50,15 +50,15 @@ def select_sources(question: str) -> tuple[str, ...]:
 
 
 def decompose_question(question: str, sources: tuple[str, ...] | None = None) -> QueryDecomposition:
-    """Create a simple deterministic search decomposition for MVP offline use."""
+    """为 MVP 离线用例创建简单且确定性的检索分解。"""
 
     cleaned = " ".join(question.strip().split())
     if not cleaned:
-        raise ValueError("question is required")
+        raise ValueError("必须提供科研问题")
     selected = sources or select_sources(cleaned)
     subquestions = (
-        f"What primary literature addresses: {cleaned}?",
-        "Which findings are metadata/abstract-supported versus hypotheses?",
+        f"哪些原始文献讨论了：{cleaned}？",
+        "哪些发现由元数据/摘要支持，哪些仍属于假设？",
     )
     queries = tuple(
         SearchQueryRecord(
@@ -84,10 +84,10 @@ def _provider_query(question: str, source: str) -> str:
 
 def _rationale_for_source(source: str) -> str:
     return {
-        "pubmed": "Biomedical/life-science source for peer-reviewed metadata.",
-        "arxiv": "Allowlisted arXiv API source for preprint and computational/statistical questions.",
-        "semantic_scholar": "Broad metadata and citation enrichment source.",
-    }.get(source, "Selected by source policy.")
+        "pubmed": "用于同行评议元数据的生物医学/生命科学来源。",
+        "arxiv": "allowlist 中的 arXiv API 来源，适合预印本与计算/统计问题。",
+        "semantic_scholar": "覆盖面较广的元数据与引用增强来源。",
+    }.get(source, "由来源策略选定。")
 
 
 def _endpoint_family_for_source(source: str) -> str:

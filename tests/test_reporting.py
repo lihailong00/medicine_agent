@@ -16,8 +16,8 @@ def test_hypothesis_evidence_can_be_labeled_without_refs():
 
 
 def test_research_only_statement_is_strict():
-    assert "not clinical decision support" in RESEARCH_ONLY_STATEMENT
-    assert "diagnosis" in RESEARCH_ONLY_STATEMENT
+    assert "不是临床决策支持" in RESEARCH_ONLY_STATEMENT
+    assert "诊断" in RESEARCH_ONLY_STATEMENT
 
 
 def test_source_status_observability_fields():
@@ -35,5 +35,5 @@ def test_live_metadata_only_evidence_is_not_called_offline_mock():
     )
 
     literature = next(item for item in evidence if item.status == "literature_supported")
-    assert "Live literature metadata/abstract" in literature.claim
-    assert "Offline mock" not in literature.claim
+    assert "实时文献元数据/摘要" in literature.claim
+    assert "离线模拟" not in literature.claim

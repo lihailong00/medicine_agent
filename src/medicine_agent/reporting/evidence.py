@@ -19,35 +19,35 @@ def build_evidence(
         ref = f"{top['source_file']}#row-{top['row_index']}"
         evidence.append(EvidenceItem(
             claim=(
-                f"The strongest ranked LIANA interaction in the provided data is "
-                f"{top['ligand']} -> {top['receptor']} from {top['source_cell']} to {top['target_cell']}."
+                f"给定数据中排序最靠前的 LIANA 互作是 "
+                f"{top['source_cell']} 到 {top['target_cell']} 的 {top['ligand']} -> {top['receptor']}。"
             ),
             status="data_supported",
             evidence_refs=[ref],
             confidence="medium",
-            limitations=["Ranking is statistical/provenance evidence only and does not establish mechanism causality."],
+            limitations=["排序仅提供统计/溯源证据，不能证明机制因果关系。"],
         ))
     if papers:
         if full_text_enabled:
             scopes = _evidence_scopes(full_text_records or [])
-            claim = "Live literature retrieval produced traceable records with scoped evidence boundaries."
+            claim = "实时文献检索生成了可追踪记录，并标明了证据范围边界。"
             confidence = "medium" if "full_text_xml" in scopes else "low"
             limitations = [
-                "Evidence scope is per record: abstract metadata, Semantic Scholar snippets, PMC XML text, or arXiv PDF artifact bytes.",
-                "arXiv PDF artifacts are stored for audit but are not parsed as dependency-free full text.",
+                "证据范围逐条记录标注：摘要元数据、Semantic Scholar 片段、PMC XML 文本或 arXiv PDF 产物字节。",
+                "arXiv PDF 产物会保存用于审计，但不会在无额外依赖的前提下声明已解析为全文。",
             ]
             if not scopes:
-                limitations.append("No approved full-text route succeeded; synthesis should rely on metadata/abstract evidence only.")
+                limitations.append("没有获批全文路径检索成功；综合应仅依赖元数据/摘要证据。")
         elif live_literature_enabled:
-            claim = "Live literature metadata/abstract retrieval produced traceable records from approved scholarly APIs."
+            claim = "实时文献元数据/摘要检索从获批学术 API 生成了可追踪记录。"
             confidence = "medium"
             limitations = [
-                "Live metadata/abstract records are not full-text evidence; enable --full-text to attempt approved full-text/snippet artifacts.",
+                "实时元数据/摘要记录不是全文证据；如需尝试获批的全文/片段产物，请启用 --full-text。",
             ]
         else:
-            claim = "Offline literature search produced traceable placeholder records for reproducible workflow validation."
+            claim = "离线文献检索生成了可追踪占位记录，用于可复现工作流验证。"
             confidence = "low"
-            limitations = ["Offline mock records are not scientific evidence; enable reviewed live providers for real literature retrieval."]
+            limitations = ["离线模拟记录不是科学证据；真实文献检索需启用经过审查的实时提供器。"]
         evidence.append(EvidenceItem(
             claim=claim,
             status="literature_supported",
@@ -56,11 +56,11 @@ def build_evidence(
             limitations=limitations,
         ))
     evidence.append(EvidenceItem(
-        claim=f"Mechanistic interpretation for '{question}' remains a testable hypothesis until supported by direct literature and experimental validation.",
+        claim=f"关于“{question}”的机制解读在获得直接文献与实验验证前仍属于可检验假设。",
         status="hypothesis",
         evidence_refs=[],
         confidence="low",
-        limitations=["Generated for research planning only; not diagnostic or therapeutic advice."],
+        limitations=["仅为科研规划生成；不是诊断或治疗建议。"],
     ))
     return evidence
 

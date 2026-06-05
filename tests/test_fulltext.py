@@ -224,8 +224,8 @@ def test_build_arxiv_pdf_url_constructs_https_from_id_and_rejects_unsafe_values(
     try:
         build_arxiv_pdf_url("https://publisher.example/file.pdf")
     except ValueError as exc:
-        assert "unsafe" in str(exc)
-    else:  # pragma: no cover - assertion clarity.
+        assert "不安全" in str(exc)
+    else:  # pragma: no cover - 让断言意图更清晰。
         raise AssertionError("unsafe arXiv ID was accepted")
 
 
@@ -300,7 +300,7 @@ def test_retrieve_semantic_scholar_snippets_never_follows_open_access_pdf(tmp_pa
     assert urlparse(calls[0]).netloc == "api.semanticscholar.org"
     assert record.status.status == FullTextStatusValue.SUCCEEDED
     assert record.status.scope == EvidenceScope.SNIPPET
-    assert "not complete full text" in record.status.parser_limitations[0]
+    assert "并非完整全文" in record.status.parser_limitations[0]
     assert "Body excerpt" in Path(record.status.artifact_path).read_text(encoding="utf-8")
 
 
