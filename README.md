@@ -116,6 +116,22 @@ LLM 不用于替代：
 
 LLM 综述会写入 `artifacts/review_synthesis.json`，并同步进入 `run_manifest.json` 与最终 `report.md`。
 
+### 为什么“开始 LLM 证据抽取与结构化综述生成”可能很慢
+
+这一步会把本轮检索到的论文元数据/摘要、获批全文片段、本地数据摘要和基础证据表一起交给 DeepSeek 生成结构化综述。默认配置偏向“多读证据、少漏上下文”，因此在全文片段较多或上下文预算较大时会比前面的 API 检索明显更慢。
+
+运行日志会在调用前打印 `LLM 输入规模`、`LLM 预算参数` 和 `LLM 文本规模估算`，并在返回后打印本次 API 调用耗时。若只是想快速调试，可在 `.env` 中临时调小这些值：
+
+```bash
+DEEPSEEK_REVIEW_CONTEXT_TOKENS=200000
+DEEPSEEK_REVIEW_MAX_FULL_TEXT_RECORDS=20
+DEEPSEEK_MAX_FULL_TEXT_PREVIEW_CHARS=20000
+DEEPSEEK_REVIEW_MAX_TOKENS=8000
+DEEPSEEK_TIMEOUT_SECONDS=180
+```
+
+如果只想看元数据/摘要流程，也可以临时运行 `./start.sh --no-full-text`，但默认仍会开启全文/片段检索。
+
 ## 全文/片段检索
 
 全文/片段检索默认开启。普通运行会在实时元数据检索后，尽可能尝试获取获批路径上的全文证据：

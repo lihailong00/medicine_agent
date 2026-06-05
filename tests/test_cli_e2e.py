@@ -496,6 +496,9 @@ def test_orchestrator_uses_llm_review_synthesis_when_available(monkeypatch, tmp_
     assert "来源计划预览[1]：pubmed query=`(diabetes mellitus recent advances) AND (review OR mechanism OR single-cell)`" in debug_messages
     assert "论文预览[1/1]：pubmed；id=PMID-1；Diabetes beta cell review" in debug_messages
     assert "基础证据预览[1/" in debug_messages
+    assert "LLM 输入规模：papers=1/1" in debug_messages
+    assert "LLM 预算参数：context_tokens=" in debug_messages
+    assert "LLM 结构化综述 API 调用返回：耗时" in debug_messages
     assert "LLM 摘要预览：LLM 生成的糖尿病结构化综述摘要。" in debug_messages
     assert "LLM 关键发现预览[1/1]" in debug_messages
     assert "综述生成器：`llm_deepseek`" in report

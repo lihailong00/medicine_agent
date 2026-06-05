@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import csv
+import os
 import sys
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Mapping, cast
 
 from .data.discovery import discover_data_files
@@ -12,7 +14,19 @@ from .data.liana import summarize_liana, summarize_liana_files
 from .literature.fulltext import retrieve_full_text_for_payloads
 from .literature.providers import build_default_coordinator
 from .literature.source_selector import decompose_question, select_sources
-from .llm import require_deepseek_config, synthesize_review_with_llm
+from .llm import (
+    DEFAULT_APPROX_CHARS_PER_TOKEN,
+    DEFAULT_MAX_ABSTRACT_CHARS,
+    DEFAULT_MAX_FULL_TEXT_PREVIEW_CHARS,
+    DEFAULT_REVIEW_CONTEXT_TOKENS,
+    DEFAULT_REVIEW_MAX_EVIDENCE,
+    DEFAULT_REVIEW_MAX_FULL_TEXT_RECORDS,
+    DEFAULT_REVIEW_MAX_INTERACTIONS,
+    DEFAULT_REVIEW_MAX_PAPERS,
+    DEFAULT_REVIEW_MAX_TOKENS,
+    require_deepseek_config,
+    synthesize_review_with_llm,
+)
 from .models import (
     EvidenceItem,
     OperationClass,
@@ -77,13 +91,25 @@ def should_inspect_data_for_question(question: str) -> bool:
 def run_research(request: ResearchRequest) -> dict[str, Any]:
     """运行默认联网的科研工作流，并写入生成产物。"""
 
-    debug_steps: list[dict[str, str]] = []
+    debug_steps: list[dict[str, object]] = []
+    run_started_perf = perf_counter()
+    last_step_perf = run_started_perf
 
     def step(message: str) -> None:
-        entry = {"timestamp": utc_now(), "message": message}
+        nonlocal last_step_perf
+        now_perf = perf_counter()
+        elapsed = now_perf - run_started_perf
+        delta = now_perf - last_step_perf
+        last_step_perf = now_perf
+        entry = {
+            "timestamp": utc_now(),
+            "elapsed_seconds": round(elapsed, 3),
+            "delta_seconds": round(delta, 3),
+            "message": message,
+        }
         debug_steps.append(entry)
         if request.debug_steps:
-            print(f"[medicine-agent] {message}", file=sys.stderr, flush=True)
+            print(f"[medicine-agent +{elapsed:.1f}s Δ{delta:.1f}s] {message}", file=sys.stderr, flush=True)
 
     step("开始运行科研工作流")
     llm_config = require_deepseek_config()
@@ -264,6 +290,16 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
     review_synthesis: dict[str, object]
     if clinical_decision is None:
         step("开始 LLM 证据抽取与结构化综述生成")
+        for message in _review_context_debug_messages(
+            papers=paper_records,
+            evidence=evidence,
+            interactions=interactions_for_review,
+            full_text_records=full_text_records if full_text_enabled else [],
+            allowed_refs=review_allowed_refs,
+            timeout_seconds=llm_config.timeout,
+        ):
+            step(message)
+        llm_started_perf = perf_counter()
         llm_synthesis = synthesize_review_with_llm(
             request.question,
             papers=paper_records,
@@ -273,6 +309,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             allowed_refs=review_allowed_refs,
             network_gate=safety,
         )
+        step(f"LLM 结构化综述 API 调用返回：耗时 {perf_counter() - llm_started_perf:.1f}s")
         if llm_synthesis is None:
             raise RuntimeError(
                 "LLM 结构化综述失败：请检查 DEEPSEEK_API_KEY/MEDICINE_AGENT_DEEPSEEK_API_KEY、"
@@ -492,6 +529,77 @@ def _synthesis_preview_messages(synthesis: Mapping[str, object]) -> list[str]:
             f"refs={ref_text}；claim={_preview_text(row.get('claim'), 220)}"
         )
     return messages
+
+
+def _review_context_debug_messages(
+    *,
+    papers: list[PaperRecord],
+    evidence: list[EvidenceItem],
+    interactions: list[Mapping[str, object]],
+    full_text_records: list[Mapping[str, object]],
+    allowed_refs: set[str],
+    timeout_seconds: int,
+) -> list[str]:
+    """给 LLM 慢调用打印输入规模和关键预算，帮助定位耗时来源。"""
+
+    context_tokens = _env_int_for_debug("DEEPSEEK_REVIEW_CONTEXT_TOKENS", DEFAULT_REVIEW_CONTEXT_TOKENS)
+    approx_chars_per_token = _env_int_for_debug("DEEPSEEK_APPROX_CHARS_PER_TOKEN", DEFAULT_APPROX_CHARS_PER_TOKEN)
+    context_chars = _env_int_for_debug("DEEPSEEK_REVIEW_CONTEXT_CHARS", context_tokens * approx_chars_per_token)
+    max_tokens = _env_int_for_debug("DEEPSEEK_REVIEW_MAX_TOKENS", DEFAULT_REVIEW_MAX_TOKENS)
+    paper_limit = _env_int_for_debug("DEEPSEEK_REVIEW_MAX_PAPERS", DEFAULT_REVIEW_MAX_PAPERS)
+    full_text_limit = _env_int_for_debug(
+        "DEEPSEEK_REVIEW_MAX_FULL_TEXT_RECORDS",
+        DEFAULT_REVIEW_MAX_FULL_TEXT_RECORDS,
+    )
+    interaction_limit = _env_int_for_debug("DEEPSEEK_REVIEW_MAX_INTERACTIONS", DEFAULT_REVIEW_MAX_INTERACTIONS)
+    evidence_limit = _env_int_for_debug("DEEPSEEK_REVIEW_MAX_EVIDENCE", DEFAULT_REVIEW_MAX_EVIDENCE)
+    abstract_chars = _env_int_for_debug("DEEPSEEK_MAX_ABSTRACT_CHARS", DEFAULT_MAX_ABSTRACT_CHARS)
+    full_text_preview_chars = _env_int_for_debug(
+        "DEEPSEEK_MAX_FULL_TEXT_PREVIEW_CHARS",
+        DEFAULT_MAX_FULL_TEXT_PREVIEW_CHARS,
+    )
+
+    selected_papers = papers[:paper_limit]
+    selected_full_text = full_text_records[:full_text_limit]
+    selected_interactions = interactions[:interaction_limit]
+    selected_evidence = evidence[:evidence_limit]
+    abstract_payload_chars = sum(min(len(paper.abstract or ""), abstract_chars) for paper in selected_papers)
+    full_text_payload_chars = sum(min(len(str(record.get("text_preview") or "")), full_text_preview_chars) for record in selected_full_text)
+    estimated_text_chars = abstract_payload_chars + full_text_payload_chars
+
+    messages = [
+        "LLM 输入规模："
+        f"papers={len(selected_papers)}/{len(papers)}，"
+        f"full_text_records={len(selected_full_text)}/{len(full_text_records)}，"
+        f"data_interactions={len(selected_interactions)}/{len(interactions)}，"
+        f"evidence={len(selected_evidence)}/{len(evidence)}，"
+        f"allowed_refs={len(allowed_refs)}",
+        "LLM 预算参数："
+        f"context_tokens={context_tokens}，approx_context_chars={context_chars}，"
+        f"max_output_tokens={max_tokens}，timeout={timeout_seconds}s，"
+        f"abstract_chars_per_paper={abstract_chars}，full_text_preview_chars_per_record={full_text_preview_chars}",
+        "LLM 文本规模估算："
+        f"abstract_chars≈{abstract_payload_chars}，full_text_preview_chars≈{full_text_payload_chars}，"
+        f"合计文本≈{estimated_text_chars} 字符",
+    ]
+    if estimated_text_chars >= 200_000 or context_tokens >= 500_000 or full_text_payload_chars >= 100_000:
+        messages.append(
+            "LLM 耗时提示：当前综述会发送较大的摘要/全文片段上下文；如需加速，可临时降低 "
+            "DEEPSEEK_REVIEW_CONTEXT_TOKENS、DEEPSEEK_REVIEW_MAX_FULL_TEXT_RECORDS、"
+            "DEEPSEEK_MAX_FULL_TEXT_PREVIEW_CHARS 或 DEEPSEEK_REVIEW_MAX_TOKENS。"
+        )
+    return messages
+
+
+def _env_int_for_debug(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if not value:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _mapping(value: object) -> Mapping[str, object]:
