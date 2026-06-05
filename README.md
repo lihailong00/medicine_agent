@@ -70,9 +70,20 @@ PYTHONPATH=src python -m medicine_agent.cli run \
 可配置环境变量：
 
 - `DEEPSEEK_API_KEY` 或 `MEDICINE_AGENT_DEEPSEEK_API_KEY`：必需，DeepSeek API key
-- `DEEPSEEK_MODEL`：必需，例如 `deepseek-chat`
+- `DEEPSEEK_MODEL`：必需，例如 `deepseek-v4-pro`
 - `DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`，会请求 `/chat/completions`
-- `DEEPSEEK_TIMEOUT_SECONDS`：默认与其他实时 API 一致
+- `DEEPSEEK_TIMEOUT_SECONDS`：DeepSeek 调用超时，默认 `90`
+- `DEEPSEEK_QUERY_MAX_TOKENS`：query 规划最大输出 token，默认 `1200`
+- `DEEPSEEK_REVIEW_MAX_TOKENS`：结构化综述最大输出 token，默认 `16000`；`deepseek-v4-pro` 会消耗较多 reasoning tokens，不建议低于默认值
+- `DEEPSEEK_REVIEW_CONTEXT_TOKENS`：结构化综述目标上下文预算，默认 `1000000`。DeepSeek API 不提供单独的 `context_window` 请求参数；这里控制项目构造 prompt 时的应用侧预算。
+- `DEEPSEEK_APPROX_CHARS_PER_TOKEN`：预算换算时的近似字符/token，默认 `3`
+- `DEEPSEEK_REVIEW_CONTEXT_CHARS`：如需绕过 token 近似，可直接设置结构化综述 prompt 的应用侧总字符预算
+- `DEEPSEEK_REVIEW_MAX_PAPERS`：传入综述 LLM 的论文记录数，默认 `500`
+- `DEEPSEEK_REVIEW_MAX_FULL_TEXT_RECORDS`：传入综述 LLM 的全文/片段记录数，默认 `200`
+- `DEEPSEEK_REVIEW_MAX_INTERACTIONS`：传入综述 LLM 的本地数据互作记录数，默认 `2000`
+- `DEEPSEEK_REVIEW_MAX_EVIDENCE`：传入综述 LLM 的基础证据项数，默认 `500`
+- `DEEPSEEK_MAX_ABSTRACT_CHARS`：每篇摘要传入 LLM 的字符上限，默认 `20000`
+- `DEEPSEEK_MAX_FULL_TEXT_PREVIEW_CHARS`：每条全文/片段预览传入 LLM 的字符上限，默认 `120000`
 
 DeepSeek key 只从环境变量读取，不会写入报告、manifest、搜索日志或安全决策日志。DeepSeek 参与的是语义规划与写作，不替代证据来源：论文元数据、摘要和全文证据仍来自 PubMed/NCBI、arXiv 与 Semantic Scholar 的 allowlist 路径。
 

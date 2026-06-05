@@ -4,7 +4,16 @@ import unittest
 from unittest.mock import patch
 
 from medicine_agent.literature.source_selector import decompose_question
-from medicine_agent.llm import DeepSeekConfig, LLMConfigurationError, plan_query_with_llm, require_deepseek_config
+from medicine_agent.llm import (
+    DeepSeekConfig,
+    LLMConfigurationError,
+    _build_review_synthesis_payload,
+    _extract_message_content,
+    load_deepseek_config,
+    plan_query_with_llm,
+    require_deepseek_config,
+)
+from medicine_agent.models import PaperRecord
 from medicine_agent.safety import SafetyGate
 
 
@@ -57,6 +66,49 @@ class LLMQueryPlanningTests(unittest.TestCase):
         with patch.dict(os.environ, {"DEEPSEEK_MODEL": "deepseek-chat"}, clear=True):
             with self.assertRaisesRegex(LLMConfigurationError, "DEEPSEEK_API_KEY"):
                 require_deepseek_config()
+
+    def test_deepseek_config_defaults_allow_reasoning_model_latency(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dummy-test-key", "DEEPSEEK_MODEL": "deepseek-v4-pro"}, clear=True):
+            config = load_deepseek_config()
+
+        self.assertIsNotNone(config)
+        assert config is not None
+        self.assertEqual(config.timeout, 90)
+
+    def test_review_payload_uses_v4_pro_friendly_token_budget(self):
+        papers = [
+            PaperRecord(
+                title=f"paper {idx}",
+                abstract="A" * 7000,
+                source="pubmed",
+                pmid=f"PMID-{idx}",
+            )
+            for idx in range(60)
+        ]
+        with patch.dict(os.environ, {}, clear=True):
+            payload = _build_review_synthesis_payload(
+                "帮我调研糖尿病研究的最新进展",
+                papers=papers,
+                evidence=[],
+                interactions=[],
+                full_text_records=[],
+                allowed_refs=set(),
+                model="deepseek-v4-pro",
+            )
+
+        user_payload = json.loads(payload["messages"][1]["content"])
+        self.assertEqual(payload["max_tokens"], 16000)
+        self.assertEqual(len(user_payload["papers"]), 60)
+        self.assertEqual(len(user_payload["papers"][0]["abstract"]), 7000)
+        self.assertEqual(user_payload["context_budget"]["target_context_tokens"], 1_000_000)
+        self.assertEqual(user_payload["context_budget"]["approx_context_chars"], 3_000_000)
+        self.assertEqual(user_payload["context_budget"]["paper_limit"], 500)
+
+    def test_truncated_deepseek_response_has_actionable_message(self):
+        response = {"choices": [{"finish_reason": "length", "message": {"content": "{\"x\""}}]}
+
+        with self.assertRaisesRegex(ValueError, "DEEPSEEK_REVIEW_MAX_TOKENS"):
+            _extract_message_content(response)
 
     def test_llm_network_decision_logs_endpoint_without_secret_header(self):
         class FakeResponse:

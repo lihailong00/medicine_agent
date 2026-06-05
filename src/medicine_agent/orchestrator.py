@@ -242,7 +242,11 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             network_gate=safety,
         )
         if llm_synthesis is None:
-            raise RuntimeError("LLM 结构化综述失败：请检查 DEEPSEEK_API_KEY/MEDICINE_AGENT_DEEPSEEK_API_KEY、DEEPSEEK_MODEL、额度与网络连通性。")
+            raise RuntimeError(
+                "LLM 结构化综述失败：请检查 DEEPSEEK_API_KEY/MEDICINE_AGENT_DEEPSEEK_API_KEY、"
+                "DEEPSEEK_MODEL、额度与网络连通性。若使用 deepseek-v4-pro，请确认 "
+                "DEEPSEEK_REVIEW_MAX_TOKENS 与 DEEPSEEK_TIMEOUT_SECONDS 足够大。"
+            )
         review_synthesis = llm_synthesis
         evidence = evidence_from_synthesis(review_synthesis, evidence, allowed_refs=review_allowed_refs)
         validate_evidence(evidence)

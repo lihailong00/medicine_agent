@@ -8,16 +8,25 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from medicine_agent.models import EvidenceItem, PaperRecord
-from medicine_agent.network_policy import DEFAULT_TIMEOUT_SECONDS, post_json_bytes
+from medicine_agent.network_policy import post_json_bytes
 from medicine_agent.reporting.synthesis import sanitize_review_synthesis
 from medicine_agent.safety import SafetyGate
 
 ALLOWED_LITERATURE_SOURCES = ("pubmed", "semantic_scholar", "arxiv")
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEFAULT_DEEPSEEK_TIMEOUT_SECONDS = 90
+DEFAULT_QUERY_MAX_TOKENS = 1200
+DEFAULT_REVIEW_MAX_TOKENS = 16000
+DEFAULT_REVIEW_CONTEXT_TOKENS = 1_000_000
+DEFAULT_APPROX_CHARS_PER_TOKEN = 3
+DEFAULT_REVIEW_MAX_PAPERS = 500
+DEFAULT_REVIEW_MAX_FULL_TEXT_RECORDS = 200
+DEFAULT_REVIEW_MAX_INTERACTIONS = 2_000
+DEFAULT_REVIEW_MAX_EVIDENCE = 500
+DEFAULT_MAX_ABSTRACT_CHARS = 20_000
+DEFAULT_MAX_FULL_TEXT_PREVIEW_CHARS = 120_000
 MAX_SEARCH_TOPIC_CHARS = 320
 MAX_RATIONALE_CHARS = 500
-MAX_ABSTRACT_CHARS = 1800
-MAX_FULL_TEXT_PREVIEW_CHARS = 1800
 
 
 class LLMConfigurationError(ValueError):
@@ -31,7 +40,7 @@ class DeepSeekConfig:
     api_key: str
     model: str
     base_url: str = DEFAULT_DEEPSEEK_BASE_URL
-    timeout: int = DEFAULT_TIMEOUT_SECONDS
+    timeout: int = DEFAULT_DEEPSEEK_TIMEOUT_SECONDS
 
     @property
     def chat_completions_url(self) -> str:
@@ -71,7 +80,7 @@ def load_deepseek_config() -> DeepSeekConfig | None:
     if not api_key or not model:
         return None
     base_url = os.environ.get("DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL).strip() or DEFAULT_DEEPSEEK_BASE_URL
-    timeout = _env_int("DEEPSEEK_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS)
+    timeout = _env_int("DEEPSEEK_TIMEOUT_SECONDS", DEFAULT_DEEPSEEK_TIMEOUT_SECONDS)
     return DeepSeekConfig(api_key=api_key, model=model, base_url=base_url, timeout=timeout)
 
 
@@ -189,7 +198,7 @@ def _build_query_planning_payload(question: str, allowed_sources: Sequence[str],
             {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
         ],
         "temperature": 0,
-        "max_tokens": 800,
+        "max_tokens": _env_int("DEEPSEEK_QUERY_MAX_TOKENS", DEFAULT_QUERY_MAX_TOKENS),
         "response_format": {"type": "json_object"},
     }
 
@@ -213,13 +222,61 @@ def _build_review_synthesis_payload(
         "只返回 JSON 对象，字段为 executive_summary、key_findings、evidence_table、"
         "mechanism_review、hypotheses、limitations_conflicts、reproducibility_notes。"
     )
+    context_tokens = _env_int("DEEPSEEK_REVIEW_CONTEXT_TOKENS", DEFAULT_REVIEW_CONTEXT_TOKENS)
+    context_chars = _env_int(
+        "DEEPSEEK_REVIEW_CONTEXT_CHARS",
+        context_tokens * _env_int("DEEPSEEK_APPROX_CHARS_PER_TOKEN", DEFAULT_APPROX_CHARS_PER_TOKEN),
+    )
+    paper_limit = _env_int("DEEPSEEK_REVIEW_MAX_PAPERS", DEFAULT_REVIEW_MAX_PAPERS)
+    full_text_limit = _env_int("DEEPSEEK_REVIEW_MAX_FULL_TEXT_RECORDS", DEFAULT_REVIEW_MAX_FULL_TEXT_RECORDS)
+    interaction_limit = _env_int("DEEPSEEK_REVIEW_MAX_INTERACTIONS", DEFAULT_REVIEW_MAX_INTERACTIONS)
+    evidence_limit = _env_int("DEEPSEEK_REVIEW_MAX_EVIDENCE", DEFAULT_REVIEW_MAX_EVIDENCE)
+    abstract_chars = _env_int("DEEPSEEK_MAX_ABSTRACT_CHARS", DEFAULT_MAX_ABSTRACT_CHARS)
+    full_text_preview_chars = _env_int("DEEPSEEK_MAX_FULL_TEXT_PREVIEW_CHARS", DEFAULT_MAX_FULL_TEXT_PREVIEW_CHARS)
+    paper_char_budget = _env_int("DEEPSEEK_REVIEW_PAPER_CONTEXT_CHARS", context_chars * 35 // 100)
+    full_text_char_budget = _env_int("DEEPSEEK_REVIEW_FULL_TEXT_CONTEXT_CHARS", context_chars * 45 // 100)
+    data_char_budget = _env_int("DEEPSEEK_REVIEW_DATA_CONTEXT_CHARS", context_chars * 12 // 100)
+    evidence_char_budget = _env_int("DEEPSEEK_REVIEW_EVIDENCE_CONTEXT_CHARS", context_chars * 8 // 100)
+    paper_payloads = _take_with_json_char_budget(
+        [_paper_for_llm(paper, max_abstract_chars=abstract_chars) for paper in papers[:paper_limit]],
+        max_chars=paper_char_budget,
+    )
+    full_text_payloads = _take_with_json_char_budget(
+        [
+            _full_text_for_llm(record, max_preview_chars=full_text_preview_chars)
+            for record in full_text_records[:full_text_limit]
+        ],
+        max_chars=full_text_char_budget,
+    )
+    interaction_payloads = _take_with_json_char_budget(
+        [_interaction_for_llm(item) for item in interactions[:interaction_limit]],
+        max_chars=data_char_budget,
+    )
+    evidence_payloads = _take_with_json_char_budget(
+        [item.to_dict() for item in evidence[:evidence_limit]],
+        max_chars=evidence_char_budget,
+    )
     user_payload = {
         "question": question,
         "allowed_refs": sorted(allowed_refs),
-        "papers": [_paper_for_llm(paper) for paper in papers[:20]],
-        "full_text_records": [_full_text_for_llm(record) for record in full_text_records[:12]],
-        "data_interactions": [_interaction_for_llm(item) for item in interactions[:20]],
-        "existing_evidence": [item.to_dict() for item in evidence[:12]],
+        "context_budget": {
+            "target_context_tokens": context_tokens,
+            "approx_context_chars": context_chars,
+            "paper_limit": paper_limit,
+            "full_text_record_limit": full_text_limit,
+            "interaction_limit": interaction_limit,
+            "evidence_limit": evidence_limit,
+            "abstract_chars_per_paper": abstract_chars,
+            "full_text_preview_chars_per_record": full_text_preview_chars,
+            "paper_context_chars": paper_char_budget,
+            "full_text_context_chars": full_text_char_budget,
+            "data_context_chars": data_char_budget,
+            "evidence_context_chars": evidence_char_budget,
+        },
+        "papers": paper_payloads,
+        "full_text_records": full_text_payloads,
+        "data_interactions": interaction_payloads,
+        "existing_evidence": evidence_payloads,
         "required_schema": {
             "executive_summary": "中文摘要，必须说明证据范围",
             "key_findings": ["{claim,status,evidence_refs,confidence,limitations}"],
@@ -244,16 +301,16 @@ def _build_review_synthesis_payload(
             {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
         ],
         "temperature": 0.1,
-        "max_tokens": 2400,
+        "max_tokens": _env_int("DEEPSEEK_REVIEW_MAX_TOKENS", DEFAULT_REVIEW_MAX_TOKENS),
         "response_format": {"type": "json_object"},
     }
 
 
-def _paper_for_llm(paper: PaperRecord) -> dict[str, object]:
+def _paper_for_llm(paper: PaperRecord, *, max_abstract_chars: int = DEFAULT_MAX_ABSTRACT_CHARS) -> dict[str, object]:
     return {
         "paper_id": paper.evidence_id,
         "title": paper.title,
-        "abstract": _compact_text(paper.abstract, max_chars=MAX_ABSTRACT_CHARS),
+        "abstract": _compact_text(paper.abstract, max_chars=max_abstract_chars),
         "source": paper.source,
         "year": paper.year,
         "authors": paper.authors[:8],
@@ -267,7 +324,11 @@ def _paper_for_llm(paper: PaperRecord) -> dict[str, object]:
     }
 
 
-def _full_text_for_llm(record: Mapping[str, object]) -> dict[str, object]:
+def _full_text_for_llm(
+    record: Mapping[str, object],
+    *,
+    max_preview_chars: int = DEFAULT_MAX_FULL_TEXT_PREVIEW_CHARS,
+) -> dict[str, object]:
     candidate = record.get("candidate") if isinstance(record.get("candidate"), Mapping) else {}
     status = record.get("status") if isinstance(record.get("status"), Mapping) else {}
     candidate_map = candidate if isinstance(candidate, Mapping) else {}
@@ -277,7 +338,7 @@ def _full_text_for_llm(record: Mapping[str, object]) -> dict[str, object]:
         "title": str(candidate_map.get("title") or ""),
         "scope": str(status_map.get("scope") or ""),
         "status": str(status_map.get("status") or ""),
-        "text_preview": _compact_text(record.get("text_preview"), max_chars=MAX_FULL_TEXT_PREVIEW_CHARS),
+        "text_preview": _compact_text(record.get("text_preview"), max_chars=max_preview_chars),
     }
 
 
@@ -294,6 +355,26 @@ def _interaction_for_llm(item: Mapping[str, object]) -> dict[str, object]:
         "pvalue": item.get("pvalue"),
         "lr_mean": item.get("lr_mean"),
     }
+
+
+def _take_with_json_char_budget(items: Sequence[Mapping[str, object]], *, max_chars: int) -> list[Mapping[str, object]]:
+    """按 JSON 字符预算保留上下文，避免超过模型窗口前的应用侧硬截断。"""
+
+    if max_chars <= 0:
+        return []
+    selected: list[Mapping[str, object]] = []
+    used = 0
+    for item in items:
+        item_chars = len(json.dumps(item, ensure_ascii=False))
+        separator_chars = 2 if selected else 0
+        if selected and used + separator_chars + item_chars > max_chars:
+            break
+        if not selected and item_chars > max_chars:
+            selected.append(item)
+            break
+        used += separator_chars + item_chars
+        selected.append(item)
+    return selected
 
 
 def _post_deepseek_chat(
@@ -326,6 +407,11 @@ def _extract_message_content(response: Mapping[str, object]) -> str:
     first = choices[0]
     if not isinstance(first, dict):
         raise ValueError("DeepSeek choices[0] 不是对象")
+    if first.get("finish_reason") == "length":
+        raise ValueError(
+            "DeepSeek 响应因 max_tokens 截断，无法解析完整 JSON；"
+            "请提高 DEEPSEEK_REVIEW_MAX_TOKENS/DEEPSEEK_QUERY_MAX_TOKENS 或缩小输入。"
+        )
     message = first.get("message")
     if not isinstance(message, dict):
         raise ValueError("DeepSeek 响应缺少 message")
