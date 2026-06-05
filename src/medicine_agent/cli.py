@@ -27,6 +27,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use real allowlisted PubMed/NCBI, arXiv, and Semantic Scholar API queries",
     )
+    run.add_argument(
+        "--full-text",
+        action="store_true",
+        help="After live metadata search, retrieve approved full-text/snippet artifacts where available",
+    )
     run.add_argument("--include-preprints", action="store_true", help="Include preprint sources in source plan")
     return parser
 
@@ -37,6 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "run":
         parser.print_help(sys.stderr)
         return 2
+    if args.full_text and not args.live_api:
+        parser.error("--full-text requires --live-api because full-text retrieval is a live-network operation")
+    if args.full_text and args.offline:
+        parser.error("--full-text cannot be combined with --offline")
     try:
         result = run_research(ResearchRequest(
             question=args.question,
@@ -45,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
             offline=args.offline or not args.live_api,
             live_api=args.live_api,
             include_preprints=args.include_preprints,
+            full_text=args.full_text,
         ))
     except Exception as exc:
         print(f"medicine-agent failed: {exc}", file=sys.stderr)

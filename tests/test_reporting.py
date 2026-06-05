@@ -1,6 +1,7 @@
 import pytest
 
-from medicine_agent.models import EvidenceItem, SourceStatus
+from medicine_agent.models import EvidenceItem, PaperRecord, SourceStatus
+from medicine_agent.reporting.evidence import build_evidence
 from medicine_agent.reporting.markdown import RESEARCH_ONLY_STATEMENT
 
 
@@ -23,3 +24,16 @@ def test_source_status_observability_fields():
     status = SourceStatus("pubmed", "offline_mock", "query", "succeeded", "now", ["id1"], reason="mock")
     assert status.provider == "pubmed"
     assert status.result_ids == ["id1"]
+
+
+def test_live_metadata_only_evidence_is_not_called_offline_mock():
+    evidence = build_evidence(
+        "ligand receptor communication",
+        [PaperRecord(title="Live PubMed paper", abstract="abstract", source="pubmed", pmid="123")],
+        [],
+        live_literature_enabled=True,
+    )
+
+    literature = next(item for item in evidence if item.status == "literature_supported")
+    assert "Live literature metadata/abstract" in literature.claim
+    assert "Offline mock" not in literature.claim

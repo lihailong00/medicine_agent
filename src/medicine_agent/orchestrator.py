@@ -8,6 +8,7 @@ from typing import Any, Mapping, cast
 
 from .data.discovery import discover_data_files
 from .data.liana import summarize_liana, summarize_liana_files
+from .literature.fulltext import retrieve_full_text_for_payloads
 from .literature.providers import build_default_coordinator
 from .literature.source_selector import decompose_question, select_sources
 from .models import (
@@ -84,11 +85,37 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             for plan in source_plans
         ]
 
+    full_text_enabled = request.full_text and request.live_api and not request.offline and clinical_decision is None
+    full_text_payload: dict[str, object] = {
+        "requested": request.full_text,
+        "enabled": full_text_enabled,
+        "records": [],
+        "statuses": [],
+        "scope_counts": {},
+        "reason": None if full_text_enabled else _full_text_disabled_reason(request, clinical_decision),
+    }
+    if full_text_enabled:
+        retrieved = retrieve_full_text_for_payloads(
+            paper_payloads,
+            artifacts_dir=artifacts_dir / "full_text",
+            safety_gate=safety,
+            network_gate=safety,
+        )
+        full_text_payload.update(retrieved)
+    full_text_records = cast(list[Mapping[str, object]], full_text_payload["records"])
+
     data_records = discover_data_files(request.data_dir, safety)
     liana_summary = summarize_liana(data_records, safety)
     rich_liana_summary = summarize_liana_files(request.data_dir, safety_gate=safety)
 
-    evidence = build_evidence(request.question, paper_records, liana_summary.get("top_interactions", []))
+    evidence = build_evidence(
+        request.question,
+        paper_records,
+        liana_summary.get("top_interactions", []),
+        full_text_records if full_text_enabled else None,
+        full_text_enabled=full_text_enabled,
+        live_literature_enabled=request.live_api and not request.offline and clinical_decision is None,
+    )
     if clinical_decision is not None:
         evidence.insert(
             0,
@@ -103,6 +130,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
     top_csv = artifacts_dir / "liana_top_interactions.csv"
     liana_json = artifacts_dir / "liana_summary.json"
     literature_json = artifacts_dir / "literature_results.json"
+    full_text_json = artifacts_dir / "full_text_results.json"
     search_log = output_dir / "search_log.json"
     artifact_manifest = output_dir / "artifact_manifest.json"
     manifest_path = output_dir / "run_manifest.json"
@@ -111,12 +139,14 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
     _write_top_interactions_csv(top_csv, liana_summary.get("top_interactions", []), safety)
     write_json(liana_json, _to_jsonable_liana_summary(rich_liana_summary), safety)
     write_json(literature_json, literature_payload, safety)
+    write_json(full_text_json, full_text_payload, safety)
     write_json(search_log, [to_plain(status) for status in source_statuses], safety)
 
     artifact_paths = [
         str(top_csv),
         str(liana_json),
         str(literature_json),
+        str(full_text_json),
         str(search_log),
         str(artifact_manifest),
         str(report_path),
@@ -135,6 +165,8 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         evidence,
         artifact_paths,
         str(manifest_path),
+        full_text_records if full_text_enabled else None,
+        full_text_payload,
     )
     write_text(report_path, report, safety)
 
@@ -148,12 +180,14 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             "offline": request.offline,
             "live_api": request.live_api,
             "include_preprints": request.include_preprints,
+            "full_text": request.full_text,
         },
         "subquestions": list(decomposition.subquestions),
         "query_decomposition": decomposition.to_dict(),
         "source_plans": [asdict(plan) for plan in source_plans],
         "source_statuses": [to_plain(status) for status in source_statuses],
         "literature_evidence_records": literature_payload["evidence_records"],
+        "full_text_results": full_text_payload,
         "data_files": [asdict(record) for record in data_records],
         "safety_decisions": [decision.to_dict() for decision in safety.decisions],
         "evidence": [item.to_dict() for item in evidence],
@@ -167,6 +201,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         "manifest_path": str(manifest_path),
         "artifact_manifest_path": str(artifact_manifest),
         "search_log_path": str(search_log),
+        "full_text_results_path": str(full_text_json),
         "output_dir": str(output_dir),
     }
 
@@ -228,3 +263,15 @@ def _to_jsonable_liana_summary(summary: Any) -> dict[str, Any]:
         "warnings": summary.warnings,
         "safety_decisions": summary.safety_decisions,
     }
+
+
+def _full_text_disabled_reason(request: ResearchRequest, clinical_decision: object | None) -> str:
+    if clinical_decision is not None:
+        return "Clinical safety screen skipped literature and full-text retrieval."
+    if not request.full_text:
+        return "Full-text retrieval was not requested."
+    if request.offline:
+        return "Full-text retrieval requires live API mode and is disabled in offline mode."
+    if not request.live_api:
+        return "Full-text retrieval requires --live-api."
+    return "Full-text retrieval disabled."

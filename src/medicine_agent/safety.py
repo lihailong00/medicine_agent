@@ -4,19 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from medicine_agent.models import OperationClass, SafetyDecision, SafetyDecisionStatus
+from medicine_agent.network_policy import ALLOWED_LIVE_HOSTS as NETWORK_ALLOWED_LIVE_HOSTS
+from medicine_agent.network_policy import classify_allowed_url
 
 # Compatibility alias used by the LIANA lane tests and artifacts.
 SafetyStatus = SafetyDecisionStatus
-ALLOWED_LIVE_HOSTS = frozenset(
-    {
-        "eutils.ncbi.nlm.nih.gov",
-        "export.arxiv.org",
-        "api.semanticscholar.org",
-    }
-)
+ALLOWED_LIVE_HOSTS = NETWORK_ALLOWED_LIVE_HOSTS
 
 
 class SafetyGate:
@@ -70,16 +65,12 @@ class SafetyGate:
                 else "derived artifact writes must stay inside the generated output directory"
             )
         elif op == OperationClass.NETWORK_CALL:
-            parsed = urlparse(str(target))
-            status = (
-                SafetyDecisionStatus.ALLOWED
-                if parsed.scheme == "https" and parsed.netloc in ALLOWED_LIVE_HOSTS
-                else SafetyDecisionStatus.BLOCKED
-            )
+            url_decision = classify_allowed_url(str(target))
+            status = SafetyDecisionStatus.ALLOWED if url_decision.allowed else SafetyDecisionStatus.BLOCKED
             decision_rationale = (
                 rationale
                 if status == SafetyDecisionStatus.ALLOWED
-                else "network calls are restricted to PubMed/NCBI E-utilities, arXiv API, and Semantic Scholar API"
+                else url_decision.reason
             )
         elif op == OperationClass.OVERWRITE_INPUT:
             status = SafetyDecisionStatus.NEEDS_CONFIRMATION

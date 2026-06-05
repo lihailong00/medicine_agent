@@ -12,25 +12,17 @@ import os
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import urlencode
 
-from medicine_agent.models import OperationClass, SafetyDecisionStatus
+from medicine_agent.network_policy import ALLOWED_LIVE_HOSTS as NETWORK_ALLOWED_LIVE_HOSTS
+from medicine_agent.network_policy import DEFAULT_TIMEOUT_SECONDS, fetch_url_bytes
 from medicine_agent.safety import SafetyGate
 
 from .base import PaperRecord, ProviderSearchResult, SourceStatus, SourceStatusValue
 from .source_selector import decompose_question
 
-ALLOWED_LIVE_HOSTS = frozenset(
-    {
-        "eutils.ncbi.nlm.nih.gov",
-        "export.arxiv.org",
-        "api.semanticscholar.org",
-    }
-)
-DEFAULT_TIMEOUT_SECONDS = 20
 DEFAULT_MAX_RESULTS = 5
+ALLOWED_LIVE_HOSTS = NETWORK_ALLOWED_LIVE_HOSTS
 
 
 @dataclass(frozen=True)
@@ -47,8 +39,7 @@ class OfflineFixtureProvider:
         network_gate: SafetyGate | None = None,
         max_results: int = DEFAULT_MAX_RESULTS,
     ) -> ProviderSearchResult:
-        live_requested = allow_live or os.environ.get("MEDICINE_AGENT_LIVE_API") == "1"
-        if live_requested:
+        if allow_live:
             return self._search_live(query, network_gate=network_gate, max_results=max_results)
         matches = _filter_fixture_records(self.fixture_records, query)
         status = SourceStatus(
@@ -268,28 +259,9 @@ def _fetch_url(
     *,
     network_gate: SafetyGate | None = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    max_bytes: int | None = None,
 ) -> bytes:
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or parsed.netloc not in ALLOWED_LIVE_HOSTS:
-        raise PermissionError(f"live literature request blocked by host allowlist: {parsed.scheme}://{parsed.netloc}")
-    if network_gate is not None:
-        decision = network_gate.decide(
-            OperationClass.NETWORK_CALL,
-            url,
-            "live literature API request to allowlisted provider",
-        )
-        if decision.status != SafetyDecisionStatus.ALLOWED:
-            raise PermissionError(decision.rationale)
-    request = Request(url, headers={"User-Agent": "medicine-agent/0.1 (+research-only)"})
-    try:
-        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL host is allowlisted above.
-            return response.read()
-    except HTTPError as exc:
-        if exc.code == 429:
-            raise RuntimeError("rate_limited") from exc
-        raise
-    except URLError as exc:
-        raise RuntimeError(str(exc.reason)) from exc
+    return fetch_url_bytes(url, network_gate=network_gate, timeout=timeout, max_bytes=max_bytes)
 
 
 def _build_pubmed_efetch_url(ids: tuple[str, ...]) -> str:

@@ -59,10 +59,13 @@ class ResearchRequest:
     offline: bool = True
     include_preprints: bool = False
     live_api: bool = False
+    full_text: bool = False
 
     def __post_init__(self) -> None:
         if not self.question or not self.question.strip():
             raise ValueError("question is required")
+        if self.full_text and (self.offline or not self.live_api):
+            raise ValueError("full_text requires live_api=True and offline=False")
         object.__setattr__(self, "data_dir", Path(self.data_dir))
         object.__setattr__(self, "output_dir", Path(self.output_dir))
 
