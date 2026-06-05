@@ -13,6 +13,19 @@ export DEEPSEEK_MODEL="deepseek-v4-pro"
 
 也可以用 `MEDICINE_AGENT_DEEPSEEK_API_KEY` 替代 `DEEPSEEK_API_KEY`。如果缺少 key 或 `DEEPSEEK_MODEL`，CLI 会直接报错退出，不会开始检索或写入输出目录。
 
+推荐直接使用启动脚本。脚本内已经写好默认问题、默认 `data` 目录、默认输出目录、默认联网与默认全文/片段检索；会自动加载 `.env` 并设置 `PYTHONPATH=src`。你可以直接运行：
+
+```bash
+./start.sh
+```
+
+如需临时覆盖问题或输出目录：
+
+```bash
+./start.sh --question "帮我调研糖尿病研究的最新进展" \
+  --output-dir generated/diabetes_review
+```
+
 最常用命令只需要问题和输出目录；`data` 是默认输入目录，联网检索也是唯一运行模式：
 
 ```bash
