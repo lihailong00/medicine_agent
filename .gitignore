@@ -1,0 +1,20 @@
+# Local OMX/Codex runtime state
+.omx/
+
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local env files
+.venv/
+venv/
+.env
+.env.*
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
