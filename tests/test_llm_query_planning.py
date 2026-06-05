@@ -7,6 +7,7 @@ from medicine_agent.literature.source_selector import decompose_question
 from medicine_agent.llm import (
     DeepSeekConfig,
     LLMConfigurationError,
+    LLMQueryPlanningError,
     _build_review_synthesis_payload,
     _extract_message_content,
     load_deepseek_config,
@@ -49,6 +50,45 @@ class LLMQueryPlanningTests(unittest.TestCase):
         self.assertEqual({query.provider for query in plan.queries}, {"pubmed", "semantic_scholar"})
         self.assertIn("beta cell", " ".join(query.query for query in plan.queries))
         self.assertNotIn("dummy-test-key", json.dumps(plan.to_dict()))
+
+    def test_llm_query_planner_retries_transient_failure(self):
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "search_topic": "diabetes mellitus recent advances",
+                                "subquestions": ["What is new?"],
+                                "sources": ["pubmed"],
+                                "rationale": "Biomedical metadata source.",
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dummy-test-key", "DEEPSEEK_MODEL": "deepseek-chat"}, clear=False):
+            with patch("medicine_agent.llm._post_deepseek_chat", side_effect=[RuntimeError("temporary timeout"), response]) as mocked_post:
+                plan = plan_query_with_llm("diabetes", allowed_sources=("pubmed",))
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(mocked_post.call_count, 2)
+
+    def test_required_llm_query_failure_includes_root_cause_without_secret(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dummy-test-key", "DEEPSEEK_MODEL": "deepseek-chat"}, clear=True):
+            with patch("medicine_agent.llm._post_deepseek_chat", side_effect=RuntimeError("simulated timeout")):
+                with self.assertRaisesRegex(RuntimeError, "simulated timeout") as exc:
+                    decompose_question("diabetes", allow_llm=True, require_llm=True)
+
+        self.assertNotIn("dummy-test-key", str(exc.exception))
+
+    def test_plan_query_raise_on_error_exposes_attempts(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "dummy-test-key", "DEEPSEEK_MODEL": "deepseek-chat"}, clear=True):
+            with patch("medicine_agent.llm._post_deepseek_chat", side_effect=RuntimeError("temporary timeout")):
+                with self.assertRaisesRegex(LLMQueryPlanningError, "第 2 次尝试失败"):
+                    plan_query_with_llm("diabetes", allowed_sources=("pubmed",), raise_on_error=True)
 
     def test_llm_planner_missing_key_returns_none_without_network(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -108,6 +148,12 @@ class LLMQueryPlanningTests(unittest.TestCase):
         response = {"choices": [{"finish_reason": "length", "message": {"content": "{\"x\""}}]}
 
         with self.assertRaisesRegex(ValueError, "DEEPSEEK_REVIEW_MAX_TOKENS"):
+            _extract_message_content(response)
+
+    def test_deepseek_error_response_has_actionable_message(self):
+        response = {"error": {"message": "Model does not exist", "type": "invalid_request_error"}}
+
+        with self.assertRaisesRegex(RuntimeError, "Model does not exist"):
             _extract_message_content(response)
 
     def test_llm_network_decision_logs_endpoint_without_secret_header(self):

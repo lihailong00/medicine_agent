@@ -91,12 +91,33 @@ def decompose_question(
     selected_override = tuple(dict.fromkeys(sources)) if sources else None
     llm_plan = None
     if allow_llm:
-        from medicine_agent.llm import plan_query_with_llm  # 延迟导入，避免规则路径加载 LLM 组件。
+        from medicine_agent.llm import (  # 延迟导入，避免规则路径加载 LLM 组件。
+            LLMConfigurationError,
+            LLMQueryPlanningError,
+            plan_query_with_llm,
+        )
 
         allowed = selected_override or select_sources(cleaned)
-        llm_plan = plan_query_with_llm(cleaned, allowed_sources=allowed, network_gate=network_gate)
+        try:
+            llm_plan = plan_query_with_llm(
+                cleaned,
+                allowed_sources=allowed,
+                network_gate=network_gate,
+                raise_on_error=require_llm,
+            )
+        except (LLMConfigurationError, LLMQueryPlanningError) as exc:
+            if require_llm:
+                raise RuntimeError(
+                    "LLM 查询规划失败："
+                    f"{exc}。请检查 DEEPSEEK_API_KEY/MEDICINE_AGENT_DEEPSEEK_API_KEY、"
+                    "DEEPSEEK_MODEL、额度、限流和网络连通性。"
+                ) from exc
+            llm_plan = None
         if require_llm and llm_plan is None:
-            raise RuntimeError("LLM 查询规划失败：请检查 DEEPSEEK_API_KEY/MEDICINE_AGENT_DEEPSEEK_API_KEY、DEEPSEEK_MODEL 与网络连通性。")
+            raise RuntimeError(
+                "LLM 查询规划失败：DeepSeek 未返回可用规划。请检查 "
+                "DEEPSEEK_API_KEY/MEDICINE_AGENT_DEEPSEEK_API_KEY、DEEPSEEK_MODEL、额度、限流和网络连通性。"
+            )
 
     if llm_plan is not None:
         selected = selected_override or llm_plan.sources

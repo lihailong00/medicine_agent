@@ -6,6 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from typing import Mapping, Sequence
+from urllib.error import HTTPError
 
 from medicine_agent.models import EvidenceItem, PaperRecord
 from medicine_agent.network_policy import post_json_bytes
@@ -31,6 +32,14 @@ MAX_RATIONALE_CHARS = 500
 
 class LLMConfigurationError(ValueError):
     """缺少必需 LLM 配置时抛出。"""
+
+
+class LLMQueryPlanningError(RuntimeError):
+    """DeepSeek 查询规划调用或解析失败。"""
+
+
+class LLMApiError(RuntimeError):
+    """DeepSeek API 返回错误或不可解析响应。"""
 
 
 @dataclass(frozen=True)
@@ -110,28 +119,42 @@ def plan_query_with_llm(
     *,
     allowed_sources: Sequence[str] = ALLOWED_LITERATURE_SOURCES,
     network_gate: SafetyGate | None = None,
+    max_attempts: int = 2,
+    raise_on_error: bool = False,
 ) -> LLMQueryPlan | None:
     """使用 DeepSeek 生成英文检索主题；失败时返回 None，由调用方决定是否终止。"""
 
     config = load_deepseek_config()
     if config is None:
+        if raise_on_error:
+            missing = "、".join(missing_deepseek_config())
+            raise LLMConfigurationError(f"缺少必需的大模型配置：{missing}")
         return None
     sanitized_sources = _sanitize_sources(allowed_sources)
     if not sanitized_sources:
         sanitized_sources = ALLOWED_LITERATURE_SOURCES
-    try:
-        payload = _build_query_planning_payload(question, sanitized_sources, config.model)
-        response = _post_deepseek_chat(
-            config,
-            payload,
-            network_gate=network_gate,
-            rationale="使用 DeepSeek API 进行科研检索 query 改写与来源规划",
-        )
-        content = _extract_message_content(response)
-        plan_payload = _loads_json_object(content)
-        return _sanitize_llm_plan(plan_payload, question=question, allowed_sources=sanitized_sources)
-    except Exception:  # noqa: BLE001 - LLM 规划失败由上层转为可读错误。
-        return None
+    attempts = max(1, max_attempts)
+    errors: list[str] = []
+    for attempt in range(1, attempts + 1):
+        try:
+            payload = _build_query_planning_payload(question, sanitized_sources, config.model)
+            response = _post_deepseek_chat(
+                config,
+                payload,
+                network_gate=network_gate,
+                rationale="使用 DeepSeek API 进行科研检索 query 改写与来源规划",
+            )
+            content = _extract_message_content(response)
+            plan_payload = _loads_json_object(content)
+            plan = _sanitize_llm_plan(plan_payload, question=question, allowed_sources=sanitized_sources)
+            if plan is not None:
+                return plan
+            errors.append(f"第 {attempt} 次尝试失败：DeepSeek 返回 JSON 但未包含可用 search_topic/sources")
+        except Exception as exc:  # noqa: BLE001 - 需要把底层原因转为可读规划错误。
+            errors.append(f"第 {attempt} 次尝试失败：{_safe_error_message(exc, redact=config.api_key)}")
+    if raise_on_error:
+        raise LLMQueryPlanningError("；".join(errors[-attempts:]))
+    return None
 
 
 def synthesize_review_with_llm(
@@ -385,22 +408,34 @@ def _post_deepseek_chat(
     rationale: str,
 ) -> Mapping[str, object]:
     headers = {"Authorization": f"Bearer {config.api_key}"}
-    body = post_json_bytes(
-        config.chat_completions_url,
-        payload,
-        headers=headers,
-        network_gate=network_gate,
-        timeout=config.timeout,
-        rationale=rationale,
-        max_bytes=512 * 1024,
-    )
-    decoded = json.loads(body.decode("utf-8"))
+    try:
+        body = post_json_bytes(
+            config.chat_completions_url,
+            payload,
+            headers=headers,
+            network_gate=network_gate,
+            timeout=config.timeout,
+            rationale=rationale,
+            max_bytes=512 * 1024,
+        )
+    except HTTPError as exc:
+        raise LLMApiError(_http_error_message(exc, redact=config.api_key)) from exc
+    except Exception as exc:
+        raise LLMApiError(_safe_error_message(exc, redact=config.api_key)) from exc
+    try:
+        decoded = json.loads(body.decode("utf-8"))
+    except Exception as exc:
+        raise LLMApiError(f"DeepSeek 响应不是有效 JSON：{_safe_error_message(exc, redact=config.api_key)}") from exc
     if not isinstance(decoded, dict):
         raise ValueError("DeepSeek 响应不是 JSON 对象")
     return decoded
 
 
 def _extract_message_content(response: Mapping[str, object]) -> str:
+    api_error = response.get("error")
+    if isinstance(api_error, Mapping):
+        message = api_error.get("message") or api_error.get("code") or api_error.get("type") or api_error
+        raise LLMApiError(f"DeepSeek API 返回错误：{_safe_error_message(message)}")
     choices = response.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ValueError("DeepSeek 响应缺少 choices")
@@ -521,3 +556,33 @@ def _env_int(name: str, default: int) -> int:
     except ValueError:
         return default
     return parsed if parsed > 0 else default
+
+
+def _http_error_message(exc: HTTPError, *, redact: str | None = None) -> str:
+    body = ""
+    try:
+        body = exc.read(4096).decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 - HTTP 错误体读取失败时仍返回状态码。
+        body = ""
+    detail = body.strip() or str(exc)
+    return _safe_error_message(f"HTTP {exc.code} {exc.reason}: {detail}", redact=redact)
+
+
+def _safe_error_message(value: object, *, redact: str | None = None, max_chars: int = 800) -> str:
+    text = " ".join(str(value).split())
+    if redact:
+        text = text.replace(redact, "<redacted>")
+    text = _redact_secret_like_text(text)
+    if len(text) > max_chars:
+        return f"{text[:max_chars].rstrip()}…"
+    return text or "未知错误"
+
+
+def _redact_secret_like_text(text: str) -> str:
+    redacted: list[str] = []
+    for token in text.split():
+        if token.startswith("sk-") and len(token) > 10:
+            redacted.append("<redacted>")
+        else:
+            redacted.append(token)
+    return " ".join(redacted)
