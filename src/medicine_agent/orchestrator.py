@@ -97,15 +97,28 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     step(f"已准备输出目录：{output_dir}")
 
-    sources = select_sources(request.question)
-    if request.include_preprints and "arxiv" not in sources:
-        sources = (*sources, "arxiv")
-    decomposition = decompose_question(request.question, sources=sources)
+    sources_override: tuple[str, ...] | None = None
+    if request.include_preprints:
+        sources_override = select_sources(request.question)
+        if "arxiv" not in sources_override:
+            sources_override = (*sources_override, "arxiv")
+    planner_candidate = "DeepSeek LLM（若已配置环境变量，否则规则降级）" if request.live_api and not request.offline else "确定性规则"
+    step(f"开始查询分解：规划器候选={planner_candidate}")
+    decomposition = decompose_question(
+        request.question,
+        sources=sources_override,
+        allow_llm=request.live_api and not request.offline,
+        network_gate=safety,
+    )
+    sources = tuple(query.provider for query in decomposition.queries)
     source_plans = [
         SourcePlan(source=query.provider, query=query.query, rationale=query.rationale)
         for query in decomposition.queries
     ]
-    step(f"已完成查询分解：{len(decomposition.subquestions)} 个子问题，来源={', '.join(sources)}")
+    step(
+        f"已完成查询分解：{len(decomposition.subquestions)} 个子问题，"
+        f"来源={', '.join(sources)}，规划器={decomposition.planner}"
+    )
 
     if clinical_decision is None:
         step("开始文献检索")
@@ -113,6 +126,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             request.question,
             allow_live=request.live_api and not request.offline,
             network_gate=safety,
+            decomposition=decomposition,
         )
         paper_payloads = cast(list[Mapping[str, Any]], literature_payload["papers"])
         status_payloads = cast(list[Mapping[str, Any]], literature_payload["search_log"])

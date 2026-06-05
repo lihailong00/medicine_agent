@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -17,6 +18,7 @@ ALLOWED_LIVE_HOSTS = frozenset(
         "export.arxiv.org",
         "api.semanticscholar.org",
         "arxiv.org",
+        "api.deepseek.com",
     }
 )
 DEFAULT_TIMEOUT_SECONDS = 20
@@ -46,11 +48,13 @@ def classify_allowed_url(url: str) -> UrlPolicyDecision:
         return UrlPolicyDecision(url, True, "s2_graph", "Semantic Scholar API 端点已列入 allowlist")
     if parsed.netloc == "arxiv.org" and _is_allowlisted_arxiv_full_text_path(parsed.path):
         return UrlPolicyDecision(url, True, "arxiv_full_text", "arXiv 全文端点已列入 allowlist")
+    if parsed.netloc == "api.deepseek.com" and parsed.path in {"/chat/completions", "/v1/chat/completions"}:
+        return UrlPolicyDecision(url, True, "deepseek_chat", "DeepSeek Chat Completions 端点已列入 query 规划 allowlist")
     return UrlPolicyDecision(
         url,
         False,
         "blocked",
-        "网络调用仅限 PubMed/NCBI E-utilities、arXiv API/全文路径与 Semantic Scholar API",
+        "网络调用仅限 PubMed/NCBI E-utilities、arXiv API/全文路径、Semantic Scholar API 与 DeepSeek query 规划端点",
     )
 
 
@@ -77,6 +81,43 @@ def fetch_url_bytes(
             raise PermissionError(decision.rationale)
 
     request = Request(url, headers={"User-Agent": DEFAULT_USER_AGENT})
+    opener = build_opener(AllowlistRedirectHandler)
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            final_url = getattr(response, "geturl", lambda: url)()
+            assert_url_allowed(final_url)
+            return _read_capped(response, max_bytes=max_bytes)
+    except HTTPError as exc:
+        if exc.code == 429:
+            raise RuntimeError("rate_limited") from exc
+        raise
+    except URLError as exc:
+        raise RuntimeError(str(exc.reason)) from exc
+
+
+def post_json_bytes(
+    url: str,
+    payload: Mapping[str, object],
+    *,
+    headers: Mapping[str, str] | None = None,
+    network_gate: Any | None = None,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    rationale: str = "向 allowlist 中的 JSON API 发起实时请求",
+    max_bytes: int | None = None,
+) -> bytes:
+    """向 allowlist JSON API 发送 POST 请求，避免把敏感 header 写入安全日志。"""
+
+    assert_url_allowed(url)
+    if network_gate is not None:
+        decision = network_gate.decide(OperationClass.NETWORK_CALL, url, rationale)
+        if decision.status != SafetyDecisionStatus.ALLOWED:
+            raise PermissionError(decision.rationale)
+
+    request_headers = {"User-Agent": DEFAULT_USER_AGENT, "Content-Type": "application/json"}
+    if headers:
+        request_headers.update(dict(headers))
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(url, data=body, headers=request_headers, method="POST")
     opener = build_opener(AllowlistRedirectHandler)
     try:
         with opener.open(request, timeout=timeout) as response:

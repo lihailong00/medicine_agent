@@ -17,7 +17,7 @@ from medicine_agent.network_policy import ALLOWED_LIVE_HOSTS as NETWORK_ALLOWED_
 from medicine_agent.network_policy import DEFAULT_TIMEOUT_SECONDS, fetch_url_bytes
 from medicine_agent.safety import SafetyGate
 
-from .base import PaperRecord, ProviderSearchResult, SourceStatus, SourceStatusValue
+from .base import PaperRecord, ProviderSearchResult, QueryDecomposition, SourceStatus, SourceStatusValue
 from .source_selector import decompose_question
 
 DEFAULT_MAX_RESULTS = 5
@@ -85,7 +85,7 @@ class PubMedProvider(OfflineFixtureProvider):
             "db": "pubmed",
             "retmode": "json",
             "retmax": str(max_results),
-            "sort": "relevance",
+            "sort": _pubmed_sort_for_query(query),
             "tool": "medicine_agent",
             "term": query,
         }
@@ -211,8 +211,11 @@ class LiteratureSearchCoordinator:
         allow_live: bool = False,
         network_gate: SafetyGate | None = None,
         max_results: int = DEFAULT_MAX_RESULTS,
+        decomposition: QueryDecomposition | None = None,
+        allow_llm: bool = False,
     ) -> dict[str, object]:
-        decomposition = decompose_question(question)
+        if decomposition is None:
+            decomposition = decompose_question(question, allow_llm=allow_llm, network_gate=network_gate)
         results: list[ProviderSearchResult] = []
         for query in decomposition.queries:
             provider = self.providers.get(query.provider)
@@ -274,6 +277,13 @@ def _build_pubmed_efetch_url(ids: tuple[str, ...]) -> str:
     if email:
         params["email"] = email
     return "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?" + urlencode(params)
+
+
+def _pubmed_sort_for_query(query: str) -> str:
+    normalized = query.lower()
+    if any(term in normalized for term in ("recent", "latest", "最新", "研究进展")):
+        return "pub_date"
+    return "relevance"
 
 
 def _parse_pubmed_efetch(xml_payload: str) -> tuple[PaperRecord, ...]:

@@ -1,7 +1,7 @@
 import json
 import os
 import unittest
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from medicine_agent.literature import (
@@ -13,7 +13,7 @@ from medicine_agent.literature import (
     select_sources,
 )
 from medicine_agent.literature import providers as providers_mod
-from medicine_agent.literature.source_selector import decompose_question
+from medicine_agent.literature.source_selector import decompose_question, normalize_search_topic
 from medicine_agent.models import OperationClass, SafetyDecisionStatus
 from medicine_agent.safety import SafetyGate
 
@@ -142,6 +142,21 @@ class LiteratureProviderTests(unittest.TestCase):
         self.assertTrue(all(query.query for query in plan.queries))
         self.assertTrue(all(query.rationale for query in plan.queries))
         self.assertTrue(all(query.endpoint_family != "offline_fixture" for query in plan.queries))
+
+    def test_chinese_diabetes_question_is_normalized_for_english_literature_apis(self):
+        plan = decompose_question("帮我调研糖尿病研究的最新进展")
+        combined_queries = " ".join(query.query for query in plan.queries)
+        providers = {query.provider for query in plan.queries}
+
+        self.assertIn("diabetes mellitus", normalize_search_topic(plan.question))
+        self.assertIn("recent advances", combined_queries)
+        self.assertIn("diabetes mellitus", combined_queries)
+        self.assertEqual(providers, {"pubmed", "semantic_scholar"})
+
+    def test_pubmed_recent_query_uses_publication_date_sort(self):
+        url = PubMedProvider().build_live_url("diabetes mellitus recent advances")
+
+        self.assertEqual(parse_qs(urlparse(url).query)["sort"], ["pub_date"])
 
     def test_default_coordinator_produces_search_log_and_normalized_papers(self):
         output = build_default_coordinator().search_question("single-cell tumor ligand receptor communication")

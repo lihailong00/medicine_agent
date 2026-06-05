@@ -170,8 +170,11 @@ def test_cli_defaults_to_offline_without_live_api(monkeypatch):
 def test_orchestrator_full_text_writes_manifest_and_report(monkeypatch, tmp_path):
     from medicine_agent import orchestrator
 
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("MEDICINE_AGENT_DEEPSEEK_API_KEY", raising=False)
+
     class FakeCoordinator:
-        def search_question(self, question, *, allow_live=False, network_gate=None, max_results=5):
+        def search_question(self, question, *, allow_live=False, network_gate=None, max_results=5, **_kwargs):
             assert allow_live is True
             return {
                 "decomposition": {"question": question, "subquestions": [], "queries": []},
@@ -268,7 +271,10 @@ def test_orchestrator_full_text_writes_manifest_and_report(monkeypatch, tmp_path
     assert "full_text_xml" in report
 
 
-def test_orchestrator_report_explains_full_text_safety_skip(tmp_path):
+def test_orchestrator_report_explains_full_text_safety_skip(monkeypatch, tmp_path):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("MEDICINE_AGENT_DEEPSEEK_API_KEY", raising=False)
+
     result = cli.run_research(
         ResearchRequest(
             question="How should I treat this patient?",

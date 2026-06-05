@@ -82,10 +82,16 @@ class QueryDecomposition:
     question: str
     subquestions: tuple[str, ...]
     queries: tuple[SearchQueryRecord, ...]
+    search_topic: str | None = None
+    planner: str = "deterministic"
+    planner_reason: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
             "question": self.question,
+            "search_topic": self.search_topic,
+            "planner": self.planner,
+            "planner_reason": self.planner_reason,
             "subquestions": list(self.subquestions),
             "queries": [query.to_dict() for query in self.queries],
         }

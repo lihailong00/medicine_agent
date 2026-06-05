@@ -36,11 +36,32 @@ PYTHONPATH=src python -m medicine_agent.cli run \
   --live-api
 ```
 
-`--live-api` 只会对以下地址发起真实 HTTPS 请求：
+`--live-api` 会触发真实 HTTPS 请求，但证据性文献检索仍只会访问以下来源：
 
 - `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/`：用于 PubMed/NCBI ESearch 与 EFetch
 - `https://export.arxiv.org/api/query`：用于 arXiv
 - `https://api.semanticscholar.org/graph/v1/paper/search`：用于 Semantic Scholar
+
+### 可选：使用 DeepSeek 做 query 改写/来源规划
+
+如果设置了 `DEEPSEEK_API_KEY`（或 `MEDICINE_AGENT_DEEPSEEK_API_KEY`），并且运行时启用 `--live-api`，agent 会先调用 DeepSeek OpenAI 兼容的 Chat Completions 接口，把中文/自然语言科研问题改写成英文检索主题，并选择 PubMed、Semantic Scholar、arXiv 中的来源。未设置 key、接口失败或使用 `--offline` 时，会自动降级为确定性规则，不影响主流程。
+
+```bash
+export DEEPSEEK_API_KEY="你的 DeepSeek key"
+PYTHONPATH=src python -m medicine_agent.cli run \
+  --question "帮我调研糖尿病研究的最新进展" \
+  --data-dir data \
+  --output-dir generated/medicine_agent \
+  --live-api
+```
+
+可选环境变量：
+
+- `DEEPSEEK_MODEL`：默认 `deepseek-chat`
+- `DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`，会请求 `/chat/completions`
+- `DEEPSEEK_TIMEOUT_SECONDS`：默认与其他实时 API 一致
+
+DeepSeek key 只从环境变量读取，不会写入报告、manifest、搜索日志或安全决策日志。DeepSeek 只参与 query 改写和来源规划；后续论文元数据、摘要和全文证据仍来自 PubMed/NCBI、arXiv 与 Semantic Scholar 的 allowlist 路径。
 
 如需在实时元数据检索后尝试获取获批路径上的全文证据，请增加 `--full-text`：
 
@@ -66,7 +87,7 @@ agent 会写出 `artifacts/full_text_results.json`，并在检索成功时写出
 ## 安全与证据策略
 
 - 所有有副作用的动作都必须经过 `SafetyGate`。
-- 网络调用只允许访问 PubMed/NCBI、arXiv 与 Semantic Scholar API 主机；其他主机全部阻断。
+- 证据性文献检索只允许访问 PubMed/NCBI、arXiv 与 Semantic Scholar API 主机；可选 DeepSeek 端点仅用于 query 改写/来源规划。
 - 全文检索绝不跟随出版社链接或任意 `openAccessPdf` URL。
 - 依赖安装、API key 使用、长任务、脚本执行与覆盖写入在非交互模式下都需要确认。
 - 生物医学输出仅限科研用途，不是临床决策支持。

@@ -53,6 +53,9 @@ def test_shared_url_policy_classifies_allowlisted_paths():
     assert classify_allowed_url("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pmc&id=123").allowed
     assert classify_allowed_url("https://api.semanticscholar.org/graph/v1/snippet/search?query=x").allowed
     assert classify_allowed_url("https://arxiv.org/pdf/2301.00001").allowed
+    assert classify_allowed_url("https://api.deepseek.com/chat/completions").allowed
+    assert classify_allowed_url("https://api.deepseek.com/v1/chat/completions").allowed
+    assert not classify_allowed_url("https://api.deepseek.com/files").allowed
     assert not classify_allowed_url("https://arxiv.org/abs/2301.00001").allowed
     assert not classify_allowed_url("https://arxiv.org/pdf/not-an-arxiv-id").allowed
     assert not classify_allowed_url("https://publisher.example/file.pdf").allowed
