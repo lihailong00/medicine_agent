@@ -12,6 +12,7 @@ from .data.liana import summarize_liana, summarize_liana_files
 from .literature.fulltext import retrieve_full_text_for_payloads
 from .literature.providers import build_default_coordinator
 from .literature.source_selector import decompose_question, select_sources
+from .llm import synthesize_review_with_llm
 from .models import (
     EvidenceItem,
     OperationClass,
@@ -23,6 +24,7 @@ from .models import (
 )
 from .reporting.evidence import build_evidence, validate_evidence
 from .reporting.markdown import render_report
+from .reporting.synthesis import allowed_evidence_refs, build_rule_based_review_synthesis, evidence_from_synthesis
 from .safety import SafetyGate
 from .utils.io import write_json, write_text
 
@@ -202,6 +204,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         rich_liana_summary = _empty_liana_detail_summary(request, reason)
 
     step("开始构建证据表")
+    interactions_for_review = cast(list[Mapping[str, object]], liana_summary.get("top_interactions", []))
     evidence = build_evidence(
         request.question,
         paper_records,
@@ -220,12 +223,36 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
             ),
         )
     validate_evidence(evidence)
-    step(f"证据表构建完成：{len(evidence)} 条证据项")
+    step(f"基础证据表构建完成：{len(evidence)} 条证据项")
+
+    review_allowed_refs = allowed_evidence_refs(paper_records, interactions_for_review)
+    review_synthesis: dict[str, object] | None = None
+    if request.live_api and not request.offline and clinical_decision is None:
+        step("开始 LLM 证据抽取与结构化综述生成")
+        review_synthesis = synthesize_review_with_llm(
+            request.question,
+            papers=paper_records,
+            evidence=evidence,
+            interactions=interactions_for_review,
+            full_text_records=full_text_records if full_text_enabled else [],
+            allowed_refs=review_allowed_refs,
+            network_gate=safety,
+        )
+        if review_synthesis is not None:
+            evidence = evidence_from_synthesis(review_synthesis, evidence, allowed_refs=review_allowed_refs)
+            validate_evidence(evidence)
+            step(f"LLM 结构化综述完成：证据表替换为 {len(evidence)} 条 LLM 清洗证据项")
+        else:
+            step("LLM 结构化综述不可用：未配置 key 或调用/解析失败，使用规则模板")
+    if review_synthesis is None:
+        review_synthesis = build_rule_based_review_synthesis(request.question, paper_records, evidence)
+    step(f"证据表构建完成：{len(evidence)} 条证据项；综述来源={review_synthesis.get('source')}")
 
     top_csv = artifacts_dir / "liana_top_interactions.csv"
     liana_json = artifacts_dir / "liana_summary.json"
     literature_json = artifacts_dir / "literature_results.json"
     full_text_json = artifacts_dir / "full_text_results.json"
+    review_json = artifacts_dir / "review_synthesis.json"
     search_log = output_dir / "search_log.json"
     artifact_manifest = output_dir / "artifact_manifest.json"
     manifest_path = output_dir / "run_manifest.json"
@@ -236,6 +263,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
     write_json(liana_json, _to_jsonable_liana_summary(rich_liana_summary), safety)
     write_json(literature_json, literature_payload, safety)
     write_json(full_text_json, full_text_payload, safety)
+    write_json(review_json, review_synthesis, safety)
     write_json(search_log, [to_plain(status) for status in source_statuses], safety)
 
     artifact_paths = [
@@ -243,6 +271,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         str(liana_json),
         str(literature_json),
         str(full_text_json),
+        str(review_json),
         str(search_log),
         str(artifact_manifest),
         str(report_path),
@@ -263,6 +292,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         str(manifest_path),
         full_text_records if full_text_enabled else None,
         full_text_payload,
+        review_synthesis,
     )
     write_text(report_path, report, safety)
 
@@ -285,6 +315,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         "source_statuses": [to_plain(status) for status in source_statuses],
         "literature_evidence_records": literature_payload["evidence_records"],
         "full_text_results": full_text_payload,
+        "review_synthesis": review_synthesis,
         "data_files": [asdict(record) for record in data_records],
         "safety_decisions": [decision.to_dict() for decision in safety.decisions],
         "evidence": [item.to_dict() for item in evidence],
@@ -302,6 +333,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         "artifact_manifest_path": str(artifact_manifest),
         "search_log_path": str(search_log),
         "full_text_results_path": str(full_text_json),
+        "review_synthesis_path": str(review_json),
         "output_dir": str(output_dir),
     }
 

@@ -291,3 +291,93 @@ def test_orchestrator_report_explains_full_text_safety_skip(monkeypatch, tmp_pat
     assert "已请求全文检索但未运行" in report
     assert manifest["full_text_results"]["requested"] is True
     assert manifest["full_text_results"]["enabled"] is False
+
+
+def test_orchestrator_uses_llm_review_synthesis_when_available(monkeypatch, tmp_path):
+    from medicine_agent import orchestrator
+
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("MEDICINE_AGENT_DEEPSEEK_API_KEY", raising=False)
+
+    class FakeCoordinator:
+        def search_question(self, question, *, allow_live=False, network_gate=None, max_results=5, **_kwargs):
+            assert allow_live is True
+            return {
+                "decomposition": {"question": question, "subquestions": [], "queries": []},
+                "results": [],
+                "papers": [
+                    {
+                        "provider": "pubmed",
+                        "title": "Diabetes beta cell review",
+                        "abstract": "Beta cell stress and insulin resistance are discussed.",
+                        "year": 2026,
+                        "authors": ["Curie M"],
+                        "pmid": "PMID-1",
+                        "source_url": "https://pubmed.ncbi.nlm.nih.gov/1/",
+                    }
+                ],
+                "search_log": [
+                    {
+                        "provider": "pubmed",
+                        "endpoint_family": "ncbi_eutils",
+                        "query": "diabetes",
+                        "status": "succeeded",
+                        "timestamp": "2026-06-05T00:00:00Z",
+                        "result_ids": ["PMID-1"],
+                    }
+                ],
+                "evidence_records": [],
+            }
+
+    def fake_synthesis(*_args, **_kwargs):
+        return {
+            "schema_version": "review_synthesis.v1",
+            "source": "llm_deepseek",
+            "reason": "mock LLM synthesis",
+            "executive_summary": "LLM 生成的糖尿病结构化综述摘要。",
+            "key_findings": [
+                {
+                    "claim": "近期糖尿病研究强调 beta cell stress。",
+                    "status": "literature_supported",
+                    "evidence_refs": ["PMID-1"],
+                    "confidence": "medium",
+                    "limitations": ["mock"],
+                }
+            ],
+            "evidence_table": [
+                {
+                    "claim": "近期糖尿病研究强调 beta cell stress。",
+                    "status": "literature_supported",
+                    "evidence_refs": ["PMID-1"],
+                    "confidence": "medium",
+                    "limitations": ["mock"],
+                }
+            ],
+            "mechanism_review": ["beta cell stress 与胰岛素抵抗共同构成机制线索。"],
+            "hypotheses": ["可检验 beta cell stress 标志物。"],
+            "limitations_conflicts": ["仅 mock 文献。"],
+            "reproducibility_notes": ["引用 PMID-1 来自本次运行。"],
+        }
+
+    monkeypatch.setattr(orchestrator, "build_default_coordinator", lambda: FakeCoordinator())
+    monkeypatch.setattr(orchestrator, "synthesize_review_with_llm", fake_synthesis)
+
+    result = orchestrator.run_research(
+        ResearchRequest(
+            question="帮我调研糖尿病研究的最新进展",
+            data_dir=Path("data"),
+            output_dir=tmp_path / "out",
+            live_api=True,
+            offline=False,
+        )
+    )
+
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    report = Path(result["report_path"]).read_text(encoding="utf-8")
+    review_path = Path(result["review_synthesis_path"])
+
+    assert review_path.exists()
+    assert manifest["review_synthesis"]["source"] == "llm_deepseek"
+    assert manifest["evidence"][0]["claim"] == "近期糖尿病研究强调 beta cell stress。"
+    assert "综述生成器：`llm_deepseek`" in report
+    assert "LLM 生成的糖尿病结构化综述摘要" in report

@@ -42,9 +42,9 @@ PYTHONPATH=src python -m medicine_agent.cli run \
 - `https://export.arxiv.org/api/query`：用于 arXiv
 - `https://api.semanticscholar.org/graph/v1/paper/search`：用于 Semantic Scholar
 
-### 可选：使用 DeepSeek 做 query 改写/来源规划
+### 可选：使用 DeepSeek 做 query 改写、证据抽取与结构化综述
 
-如果设置了 `DEEPSEEK_API_KEY`（或 `MEDICINE_AGENT_DEEPSEEK_API_KEY`），并且运行时启用 `--live-api`，agent 会先调用 DeepSeek OpenAI 兼容的 Chat Completions 接口，把中文/自然语言科研问题改写成英文检索主题，并选择 PubMed、Semantic Scholar、arXiv 中的来源。未设置 key、接口失败或使用 `--offline` 时，会自动降级为确定性规则，不影响主流程。
+如果设置了 `DEEPSEEK_API_KEY`（或 `MEDICINE_AGENT_DEEPSEEK_API_KEY`），并且运行时启用 `--live-api`，agent 会调用 DeepSeek OpenAI 兼容的 Chat Completions 接口完成更适合 LLM 的语义任务。未设置 key、接口失败或使用 `--offline` 时，会自动降级为确定性规则，不影响主流程。
 
 ```bash
 export DEEPSEEK_API_KEY="你的 DeepSeek key"
@@ -61,7 +61,21 @@ PYTHONPATH=src python -m medicine_agent.cli run \
 - `DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`，会请求 `/chat/completions`
 - `DEEPSEEK_TIMEOUT_SECONDS`：默认与其他实时 API 一致
 
-DeepSeek key 只从环境变量读取，不会写入报告、manifest、搜索日志或安全决策日志。DeepSeek 只参与 query 改写和来源规划；后续论文元数据、摘要和全文证据仍来自 PubMed/NCBI、arXiv 与 Semantic Scholar 的 allowlist 路径。
+DeepSeek key 只从环境变量读取，不会写入报告、manifest、搜索日志或安全决策日志。DeepSeek 参与的是语义规划与写作，不替代证据来源：论文元数据、摘要和全文证据仍来自 PubMed/NCBI、arXiv 与 Semantic Scholar 的 allowlist 路径。
+
+LLM 当前用于：
+
+- **query 改写/来源规划**：把中文或口语化科研问题改写成英文检索主题，并判断是否需要 arXiv。
+- **证据主张抽取**：从本轮检索到的论文摘要/获批全文片段/本地数据摘要中抽取可引用主张。
+- **结构化综述生成**：生成执行摘要、关键发现、证据表、机制综述、可检验假设、冲突/局限与复现说明。
+
+LLM 不用于替代：
+
+- PubMed/NCBI、arXiv、Semantic Scholar 的真实 API 检索。
+- URL allowlist、安全门、文件读写边界、CSV/LIANA 统计排序。
+- 未检索到的论文引用；LLM 只能引用本次运行允许的 `paper_id` 或数据行号，非法引用会被过滤，没有引用的支持性主张会降级为 `hypothesis`。
+
+LLM 综述会写入 `artifacts/review_synthesis.json`，并同步进入 `run_manifest.json` 与最终 `report.md`。
 
 如需在实时元数据检索后尝试获取获批路径上的全文证据，请增加 `--full-text`：
 
@@ -87,7 +101,7 @@ agent 会写出 `artifacts/full_text_results.json`，并在检索成功时写出
 ## 安全与证据策略
 
 - 所有有副作用的动作都必须经过 `SafetyGate`。
-- 证据性文献检索只允许访问 PubMed/NCBI、arXiv 与 Semantic Scholar API 主机；可选 DeepSeek 端点仅用于 query 改写/来源规划。
+- 证据性文献检索只允许访问 PubMed/NCBI、arXiv 与 Semantic Scholar API 主机；可选 DeepSeek 端点仅用于 query 改写、证据抽取与结构化综述。
 - 全文检索绝不跟随出版社链接或任意 `openAccessPdf` URL。
 - 依赖安装、API key 使用、长任务、脚本执行与覆盖写入在非交互模式下都需要确认。
 - 生物医学输出仅限科研用途，不是临床决策支持。
