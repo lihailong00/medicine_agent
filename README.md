@@ -1,24 +1,43 @@
 # Medicine Agent
 
-离线优先的生信科研 agent CLI/库原型。真实文献检索只能通过显式参数开启，并且严格限制到 PubMed/NCBI E-utilities、arXiv API 与 Semantic Scholar API。
+默认联网、仅科研用途的生信科研 agent CLI/库原型。真实文献检索默认开启，但始终严格限制到 PubMed/NCBI E-utilities、arXiv API 与 Semantic Scholar API；如需完全离线/fixture 模式，可显式传入 `--offline`。
 
 ## 运行
 
+最常用命令只需要问题和输出目录；`data` 是默认输入目录，联网检索也是默认行为：
+
 ```bash
-python -m medicine_agent.cli run \
-  --question "Which ligand-receptor interactions are most relevant?" \
+PYTHONPATH=src python -m medicine_agent.cli run \
+  --question "帮我调研糖尿病研究的最新进展" \
+  --output-dir generated/medicine_agent
+```
+
+默认流程会尝试真实联网检索，不需要显式传 `--live-api`。如果配置了 `DEEPSEEK_API_KEY`，还会使用 LLM 做 query 改写、证据抽取和结构化综述；没有 key 时会自动使用确定性降级逻辑。派生的报告、manifest 与表格会写入你指定的输出目录。
+
+运行时会默认向 stderr 打印逐步调试日志，例如“开始文献检索”“跳过本地数据扫描”“开始写入产物”等；stdout 仍然只输出最终 JSON，方便脚本解析。如需关闭逐步日志，可增加 `--no-debug-steps`。
+
+兼容旧命令的 `--live-api` 仍可传入，但现在它只是显式说明“使用联网模式”，不再是必需参数：
+
+```bash
+PYTHONPATH=src python -m medicine_agent.cli run \
+  --question "帮我调研糖尿病研究的最新进展" \
   --data-dir data \
+  --output-dir generated/medicine_agent \
+  --live-api
+```
+
+如需完全离线 fixture 模式，请显式传入：
+
+```bash
+PYTHONPATH=src python -m medicine_agent.cli run \
+  --question "帮我调研糖尿病研究的最新进展" \
   --output-dir generated/medicine_agent \
   --offline
 ```
 
-默认/离线流程是确定性的，不需要 API key，也不会安装新依赖。派生的报告、manifest 与表格会写入你指定的输出目录。
-
-运行时会默认向 stderr 打印逐步调试日志，例如“开始文献检索”“跳过本地数据扫描”“开始写入产物”等；stdout 仍然只输出最终 JSON，方便脚本解析。如需关闭逐步日志，可增加 `--no-debug-steps`。
-
 ## 何时读取 data 目录
 
-agent 不会因为传入了 `--data-dir data` 就自动读取本地数据。只有当 `--question` 明确要求查看 data 目录或本地数据文件时，才会扫描并解析 `data/`。例如：
+agent 不会因为默认存在 `data/` 或传入了 `--data-dir data` 就自动读取本地数据。只有当 `--question` 明确要求查看 data 目录或本地数据文件时，才会扫描并解析 `data/`。例如：
 
 - `帮我调研糖尿病研究的最新进展`：只做文献调研，不读取 `data/`。
 - `请使用 data 目录中的 CSV 分析配体受体互作`：会读取 `data/` 并运行 LIANA/CSV 数据通道。
@@ -26,17 +45,9 @@ agent 不会因为传入了 `--data-dir data` 就自动读取本地数据。只�
 
 原始 `data/` 文件始终只作为只读输入；派生输出只会写入配置的输出目录。
 
-如需真实联网文献检索，请显式开启：
+## 联网范围
 
-```bash
-PYTHONPATH=src python -m medicine_agent.cli run \
-  --question "Which ligand-receptor interactions are most relevant in tumor immune communication?" \
-  --data-dir data \
-  --output-dir generated/medicine_agent \
-  --live-api
-```
-
-`--live-api` 会触发真实 HTTPS 请求，但证据性文献检索仍只会访问以下来源：
+默认联网模式会触发真实 HTTPS 请求，但证据性文献检索仍只会访问以下来源：
 
 - `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/`：用于 PubMed/NCBI ESearch 与 EFetch
 - `https://export.arxiv.org/api/query`：用于 arXiv
@@ -44,15 +55,13 @@ PYTHONPATH=src python -m medicine_agent.cli run \
 
 ### 可选：使用 DeepSeek 做 query 改写、证据抽取与结构化综述
 
-如果设置了 `DEEPSEEK_API_KEY`（或 `MEDICINE_AGENT_DEEPSEEK_API_KEY`），并且运行时启用 `--live-api`，agent 会调用 DeepSeek OpenAI 兼容的 Chat Completions 接口完成更适合 LLM 的语义任务。未设置 key、接口失败或使用 `--offline` 时，会自动降级为确定性规则，不影响主流程。
+如果设置了 `DEEPSEEK_API_KEY`（或 `MEDICINE_AGENT_DEEPSEEK_API_KEY`），agent 会在联网模式下调用 DeepSeek OpenAI 兼容的 Chat Completions 接口完成更适合 LLM 的语义任务。未设置 key、接口失败或使用 `--offline` 时，会自动降级为确定性规则，不影响主流程。
 
 ```bash
 export DEEPSEEK_API_KEY="你的 DeepSeek key"
 PYTHONPATH=src python -m medicine_agent.cli run \
   --question "帮我调研糖尿病研究的最新进展" \
-  --data-dir data \
-  --output-dir generated/medicine_agent \
-  --live-api
+  --output-dir generated/medicine_agent
 ```
 
 可选环境变量：
@@ -77,18 +86,18 @@ LLM 不用于替代：
 
 LLM 综述会写入 `artifacts/review_synthesis.json`，并同步进入 `run_manifest.json` 与最终 `report.md`。
 
-如需在实时元数据检索后尝试获取获批路径上的全文证据，请增加 `--full-text`：
+## 全文/片段检索
+
+如需在实时元数据检索后尝试获取获批路径上的全文证据，请增加 `--full-text`。因为联网现在是默认行为，不需要再额外传 `--live-api`：
 
 ```bash
 PYTHONPATH=src python -m medicine_agent.cli run \
   --question "Intercellular communication analysis of single-cell transcriptomics data" \
-  --data-dir data \
   --output-dir generated/medicine_agent \
-  --live-api \
   --full-text
 ```
 
-`--full-text` 必须与 `--live-api` 一起使用，且不能与 `--offline` 同时使用。它仍然只使用获批来源路径：
+`--full-text` 不能与 `--offline` 同时使用。它仍然只使用获批来源路径：
 
 - 当存在 PMCID/PMC 链接时，通过 NCBI E-utilities PubMed→PMC ELink 与 PMC EFetch XML 获取文本
 - 对 arXiv 记录构造 `https://arxiv.org/pdf/<arxiv-id>` PDF 产物 URL

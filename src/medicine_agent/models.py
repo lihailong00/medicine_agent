@@ -56,9 +56,9 @@ class ResearchRequest:
     question: str
     data_dir: Path = Path("data")
     output_dir: Path = Path("generated/medicine_agent")
-    offline: bool = True
+    offline: bool = False
     include_preprints: bool = False
-    live_api: bool = False
+    live_api: bool = True
     full_text: bool = False
     debug_steps: bool = True
 

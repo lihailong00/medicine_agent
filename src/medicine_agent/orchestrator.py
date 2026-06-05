@@ -73,7 +73,7 @@ def should_inspect_data_for_question(question: str) -> bool:
 
 
 def run_research(request: ResearchRequest) -> dict[str, Any]:
-    """运行离线优先科研工作流，并写入生成产物。"""
+    """运行默认联网的科研工作流，并写入生成产物。"""
 
     debug_steps: list[dict[str, str]] = []
 
@@ -433,5 +433,5 @@ def _full_text_disabled_reason(request: ResearchRequest, clinical_decision: obje
     if request.offline:
         return "全文检索需要实时 API 模式，在离线模式下已禁用。"
     if not request.live_api:
-        return "全文检索需要 --live-api。"
+        return "全文检索需要实时联网模式；请不要使用 --offline。"
     return "全文检索已禁用。"

@@ -103,9 +103,34 @@ def test_cli_live_api_flag_disables_offline_mode(monkeypatch):
     assert captured["request"].offline is False
 
 
-def test_cli_full_text_requires_live_api():
+def test_cli_full_text_defaults_to_live_api(monkeypatch):
+    captured = {}
+
+    def fake_run_research(request):
+        captured["request"] = request
+        return {
+            "report_path": "report.md",
+            "manifest_path": "run_manifest.json",
+            "artifact_manifest_path": "artifact_manifest.json",
+            "search_log_path": "search_log.json",
+            "full_text_results_path": "full_text_results.json",
+            "review_synthesis_path": "review_synthesis.json",
+            "output_dir": "generated/medicine_agent",
+        }
+
+    monkeypatch.setattr(cli, "run_research", fake_run_research)
+
+    exit_code = cli.main(["run", "--question", "tumor immune communication", "--full-text"])
+
+    assert exit_code == 0
+    assert captured["request"].live_api is True
+    assert captured["request"].offline is False
+    assert captured["request"].full_text is True
+
+
+def test_cli_full_text_rejects_offline_mode():
     with pytest.raises(SystemExit) as exc:
-        cli.main(["run", "--question", "tumor immune communication", "--full-text"])
+        cli.main(["run", "--question", "tumor immune communication", "--full-text", "--offline"])
 
     assert exc.value.code == 2
 
@@ -145,7 +170,7 @@ def test_cli_full_text_flag_sets_live_full_text_request(monkeypatch):
     assert captured["request"].full_text is True
 
 
-def test_cli_defaults_to_offline_without_live_api(monkeypatch):
+def test_cli_defaults_to_live_api_and_data_dir_without_flags(monkeypatch):
     captured = {}
 
     def fake_run_research(request):
@@ -155,6 +180,7 @@ def test_cli_defaults_to_offline_without_live_api(monkeypatch):
             "manifest_path": "run_manifest.json",
             "artifact_manifest_path": "artifact_manifest.json",
             "search_log_path": "search_log.json",
+            "review_synthesis_path": "review_synthesis.json",
             "output_dir": "generated/medicine_agent",
         }
 
@@ -163,8 +189,9 @@ def test_cli_defaults_to_offline_without_live_api(monkeypatch):
     exit_code = cli.main(["run", "--question", "tumor immune communication"])
 
     assert exit_code == 0
-    assert captured["request"].live_api is False
-    assert captured["request"].offline is True
+    assert captured["request"].live_api is True
+    assert captured["request"].offline is False
+    assert captured["request"].data_dir == Path("data")
 
 
 def test_orchestrator_full_text_writes_manifest_and_report(monkeypatch, tmp_path):
