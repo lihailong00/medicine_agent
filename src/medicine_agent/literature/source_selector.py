@@ -41,7 +41,7 @@ def select_sources(question: str) -> tuple[str, ...]:
     if any(term in normalized for term in BIOMEDICAL_TERMS):
         selected.extend(["pubmed", "semantic_scholar"])
     if any(term in normalized for term in PREPRINT_TERMS):
-        selected.append("biorxiv")
+        selected.append("arxiv")
     if any(term in normalized for term in COMPUTATIONAL_TERMS):
         selected.append("arxiv")
     if not selected:
@@ -65,6 +65,7 @@ def decompose_question(question: str, sources: tuple[str, ...] | None = None) ->
             provider=source,
             query=_provider_query(cleaned, source),
             rationale=_rationale_for_source(source),
+            endpoint_family=_endpoint_family_for_source(source),
         )
         for source in selected
     )
@@ -74,8 +75,6 @@ def decompose_question(question: str, sources: tuple[str, ...] | None = None) ->
 def _provider_query(question: str, source: str) -> str:
     if source == "pubmed":
         return f"({question}) AND (review OR mechanism OR single-cell)"
-    if source == "biorxiv":
-        return f"{question} preprint biology"
     if source == "arxiv":
         return f"{question} computational biology"
     if source == "semantic_scholar":
@@ -86,7 +85,14 @@ def _provider_query(question: str, source: str) -> str:
 def _rationale_for_source(source: str) -> str:
     return {
         "pubmed": "Biomedical/life-science source for peer-reviewed metadata.",
-        "biorxiv": "Preprint source for emerging biology results.",
-        "arxiv": "Computational/statistical source for methods-heavy questions.",
+        "arxiv": "Allowlisted arXiv API source for preprint and computational/statistical questions.",
         "semantic_scholar": "Broad metadata and citation enrichment source.",
     }.get(source, "Selected by source policy.")
+
+
+def _endpoint_family_for_source(source: str) -> str:
+    return {
+        "pubmed": "ncbi_eutils",
+        "arxiv": "arxiv_atom",
+        "semantic_scholar": "s2_graph",
+    }.get(source, "unknown")

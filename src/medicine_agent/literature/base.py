@@ -94,7 +94,7 @@ class QueryDecomposition:
 
 @dataclass(frozen=True)
 class PaperRecord:
-    """Normalized metadata contract across PubMed/PMC, bioRxiv, arXiv, and S2."""
+    """Normalized metadata contract across PubMed/PMC, arXiv, and Semantic Scholar."""
 
     provider: str
     title: str

@@ -1,20 +1,36 @@
-"""Offline-first literature provider implementations.
+"""Literature providers with offline fixtures and allowlisted live APIs.
 
-Live network access is intentionally not performed by default. Setting
-``MEDICINE_AGENT_LIVE_API=1`` or passing ``allow_live=True`` only enables the
-live scaffold path; unsupported live fetches still return SourceStatus records
-instead of requiring API keys or dependencies.
+Live mode is intentionally narrow: the only network destinations allowed by
+this module are NCBI/PubMed E-utilities, arXiv's Atom API, and Semantic
+Scholar's Graph API. No API key or non-stdlib dependency is required.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Iterable, Mapping
-from urllib.parse import quote_plus
+from typing import Any, Iterable, Mapping
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlparse
+from urllib.request import Request, urlopen
+
+from medicine_agent.models import OperationClass, SafetyDecisionStatus
+from medicine_agent.safety import SafetyGate
 
 from .base import PaperRecord, ProviderSearchResult, SourceStatus, SourceStatusValue
 from .source_selector import decompose_question
+
+ALLOWED_LIVE_HOSTS = frozenset(
+    {
+        "eutils.ncbi.nlm.nih.gov",
+        "export.arxiv.org",
+        "api.semanticscholar.org",
+    }
+)
+DEFAULT_TIMEOUT_SECONDS = 20
+DEFAULT_MAX_RESULTS = 5
 
 
 @dataclass(frozen=True)
@@ -23,10 +39,17 @@ class OfflineFixtureProvider:
     endpoint_family: str
     fixture_records: tuple[PaperRecord, ...]
 
-    def search(self, query: str, *, allow_live: bool = False) -> ProviderSearchResult:
+    def search(
+        self,
+        query: str,
+        *,
+        allow_live: bool = False,
+        network_gate: SafetyGate | None = None,
+        max_results: int = DEFAULT_MAX_RESULTS,
+    ) -> ProviderSearchResult:
         live_requested = allow_live or os.environ.get("MEDICINE_AGENT_LIVE_API") == "1"
         if live_requested:
-            return self._live_scaffold(query)
+            return self._search_live(query, network_gate=network_gate, max_results=max_results)
         matches = _filter_fixture_records(self.fixture_records, query)
         status = SourceStatus(
             provider=self.provider_name,
@@ -43,26 +66,23 @@ class OfflineFixtureProvider:
             statuses=(status,),
         )
 
-    def _live_scaffold(self, query: str) -> ProviderSearchResult:
+    def _search_live(
+        self,
+        query: str,
+        *,
+        network_gate: SafetyGate | None,
+        max_results: int,
+    ) -> ProviderSearchResult:
         status = SourceStatus(
             provider=self.provider_name,
             endpoint_family=self.endpoint_family,
             query=query,
-            status=SourceStatusValue.NEEDS_CONFIRMATION,
-            reason=(
-                "live provider scaffold requires an explicit SafetyGate NETWORK_CALL "
-                "decision by the orchestrator; no API key is required by default and "
-                "no network call was attempted"
-            ),
+            status=SourceStatusValue.FAILED,
+            reason="live search is not implemented for this provider",
         )
-        return ProviderSearchResult(
-            provider=self.provider_name,
-            query=query,
-            papers=(),
-            statuses=(status,),
-        )
+        return ProviderSearchResult(self.provider_name, query, (), (status,))
 
-    def build_live_url(self, query: str) -> str:
+    def build_live_url(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> str:
         raise NotImplementedError
 
 
@@ -70,43 +90,138 @@ class PubMedProvider(OfflineFixtureProvider):
     def __init__(self) -> None:
         super().__init__("pubmed", "ncbi_eutils", _PUBMED_FIXTURES)
 
-    def build_live_url(self, query: str) -> str:
-        base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-        return f"{base}?db=pubmed&retmode=json&term={quote_plus(query)}"
+    def build_live_url(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> str:
+        params = {
+            "db": "pubmed",
+            "retmode": "json",
+            "retmax": str(max_results),
+            "sort": "relevance",
+            "tool": "medicine_agent",
+            "term": query,
+        }
+        email = os.environ.get("NCBI_EMAIL")
+        if email:
+            params["email"] = email
+        return "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?" + urlencode(params)
 
+    def _search_live(
+        self,
+        query: str,
+        *,
+        network_gate: SafetyGate | None,
+        max_results: int,
+    ) -> ProviderSearchResult:
+        try:
+            search_url = self.build_live_url(query, max_results=max_results)
+            search_payload = json.loads(_fetch_url(search_url, network_gate=network_gate).decode("utf-8"))
+            ids = tuple(search_payload.get("esearchresult", {}).get("idlist", [])[:max_results])
+            if not ids:
+                return _empty_success(
+                    self.provider_name,
+                    self.endpoint_family,
+                    query,
+                    "NCBI ESearch returned no PubMed IDs",
+                )
 
-class BioRxivProvider(OfflineFixtureProvider):
-    def __init__(self) -> None:
-        super().__init__("biorxiv", "biorxiv_details", _BIORXIV_FIXTURES)
-
-    def build_live_url(self, query: str) -> str:
-        return "https://api.biorxiv.org/details/biorxiv/2020-01-01/3000-01-01/0"
+            fetch_url = _build_pubmed_efetch_url(ids)
+            xml_payload = _fetch_url(fetch_url, network_gate=network_gate).decode("utf-8", errors="replace")
+            papers = _parse_pubmed_efetch(xml_payload)
+            status = SourceStatus(
+                provider=self.provider_name,
+                endpoint_family=self.endpoint_family,
+                query=query,
+                status=SourceStatusValue.SUCCEEDED,
+                result_ids=tuple(paper.stable_id for paper in papers),
+                reason=f"live NCBI ESearch+EFetch completed for {len(papers)} PubMed records",
+            )
+            return ProviderSearchResult(self.provider_name, query, papers, (status,))
+        except Exception as exc:  # noqa: BLE001 - provider must degrade to SourceStatus.
+            return _failed_result(self.provider_name, self.endpoint_family, query, exc)
 
 
 class ArxivProvider(OfflineFixtureProvider):
     def __init__(self) -> None:
         super().__init__("arxiv", "arxiv_atom", _ARXIV_FIXTURES)
 
-    def build_live_url(self, query: str) -> str:
-        base = "https://export.arxiv.org/api/query"
-        return f"{base}?search_query=all:{quote_plus(query)}&start=0&max_results=5"
+    def build_live_url(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> str:
+        params = {
+            "search_query": f"all:{query}",
+            "start": "0",
+            "max_results": str(max_results),
+            "sortBy": "relevance",
+            "sortOrder": "descending",
+        }
+        return "https://export.arxiv.org/api/query?" + urlencode(params)
+
+    def _search_live(
+        self,
+        query: str,
+        *,
+        network_gate: SafetyGate | None,
+        max_results: int,
+    ) -> ProviderSearchResult:
+        try:
+            url = self.build_live_url(query, max_results=max_results)
+            xml_payload = _fetch_url(url, network_gate=network_gate).decode("utf-8", errors="replace")
+            papers = _parse_arxiv_atom(xml_payload)
+            status = SourceStatus(
+                provider=self.provider_name,
+                endpoint_family=self.endpoint_family,
+                query=query,
+                status=SourceStatusValue.SUCCEEDED,
+                result_ids=tuple(paper.stable_id for paper in papers),
+                reason=f"live arXiv API query completed for {len(papers)} records",
+            )
+            return ProviderSearchResult(self.provider_name, query, papers, (status,))
+        except Exception as exc:  # noqa: BLE001
+            return _failed_result(self.provider_name, self.endpoint_family, query, exc)
 
 
 class SemanticScholarProvider(OfflineFixtureProvider):
     def __init__(self) -> None:
         super().__init__("semantic_scholar", "s2_graph", _SEMANTIC_SCHOLAR_FIXTURES)
 
-    def build_live_url(self, query: str) -> str:
-        fields = "paperId,title,abstract,year,authors,citationCount,externalIds,openAccessPdf"
-        base = "https://api.semanticscholar.org/graph/v1/paper/search"
-        return f"{base}?limit=5&fields={fields}&query={quote_plus(query)}"
+    def build_live_url(self, query: str, *, max_results: int = DEFAULT_MAX_RESULTS) -> str:
+        fields = "paperId,title,abstract,year,authors,citationCount,externalIds,openAccessPdf,url,venue"
+        params = {"limit": str(max_results), "fields": fields, "query": query}
+        return "https://api.semanticscholar.org/graph/v1/paper/search?" + urlencode(params)
+
+    def _search_live(
+        self,
+        query: str,
+        *,
+        network_gate: SafetyGate | None,
+        max_results: int,
+    ) -> ProviderSearchResult:
+        try:
+            url = self.build_live_url(query, max_results=max_results)
+            payload = json.loads(_fetch_url(url, network_gate=network_gate).decode("utf-8"))
+            papers = _parse_semantic_scholar(payload)
+            status = SourceStatus(
+                provider=self.provider_name,
+                endpoint_family=self.endpoint_family,
+                query=query,
+                status=SourceStatusValue.SUCCEEDED,
+                result_ids=tuple(paper.stable_id for paper in papers),
+                reason=f"live Semantic Scholar Graph API query completed for {len(papers)} records",
+            )
+            return ProviderSearchResult(self.provider_name, query, papers, (status,))
+        except Exception as exc:  # noqa: BLE001
+            return _failed_result(self.provider_name, self.endpoint_family, query, exc)
 
 
 @dataclass(frozen=True)
 class LiteratureSearchCoordinator:
     providers: Mapping[str, OfflineFixtureProvider]
 
-    def search_question(self, question: str, *, allow_live: bool = False) -> dict[str, object]:
+    def search_question(
+        self,
+        question: str,
+        *,
+        allow_live: bool = False,
+        network_gate: SafetyGate | None = None,
+        max_results: int = DEFAULT_MAX_RESULTS,
+    ) -> dict[str, object]:
         decomposition = decompose_question(question)
         results: list[ProviderSearchResult] = []
         for query in decomposition.queries:
@@ -117,11 +232,18 @@ class LiteratureSearchCoordinator:
                     endpoint_family=query.endpoint_family,
                     query=query.query,
                     status=SourceStatusValue.SKIPPED,
-                    reason="provider is not configured",
+                    reason="provider is not configured or not in the allowed live-source set",
                 )
                 results.append(ProviderSearchResult(query.provider, query.query, (), (status,)))
                 continue
-            results.append(provider.search(query.query, allow_live=allow_live))
+            results.append(
+                provider.search(
+                    query.query,
+                    allow_live=allow_live,
+                    network_gate=network_gate,
+                    max_results=max_results,
+                )
+            )
         papers = tuple(_dedupe_papers(paper for result in results for paper in result.papers))
         return {
             "decomposition": decomposition.to_dict(),
@@ -137,8 +259,204 @@ class LiteratureSearchCoordinator:
 
 
 def build_default_coordinator() -> LiteratureSearchCoordinator:
-    providers = (PubMedProvider(), BioRxivProvider(), ArxivProvider(), SemanticScholarProvider())
+    providers = (PubMedProvider(), ArxivProvider(), SemanticScholarProvider())
     return LiteratureSearchCoordinator({provider.provider_name: provider for provider in providers})
+
+
+def _fetch_url(
+    url: str,
+    *,
+    network_gate: SafetyGate | None = None,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> bytes:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc not in ALLOWED_LIVE_HOSTS:
+        raise PermissionError(f"live literature request blocked by host allowlist: {parsed.scheme}://{parsed.netloc}")
+    if network_gate is not None:
+        decision = network_gate.decide(
+            OperationClass.NETWORK_CALL,
+            url,
+            "live literature API request to allowlisted provider",
+        )
+        if decision.status != SafetyDecisionStatus.ALLOWED:
+            raise PermissionError(decision.rationale)
+    request = Request(url, headers={"User-Agent": "medicine-agent/0.1 (+research-only)"})
+    try:
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL host is allowlisted above.
+            return response.read()
+    except HTTPError as exc:
+        if exc.code == 429:
+            raise RuntimeError("rate_limited") from exc
+        raise
+    except URLError as exc:
+        raise RuntimeError(str(exc.reason)) from exc
+
+
+def _build_pubmed_efetch_url(ids: tuple[str, ...]) -> str:
+    params = {
+        "db": "pubmed",
+        "retmode": "xml",
+        "id": ",".join(ids),
+        "tool": "medicine_agent",
+    }
+    email = os.environ.get("NCBI_EMAIL")
+    if email:
+        params["email"] = email
+    return "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?" + urlencode(params)
+
+
+def _parse_pubmed_efetch(xml_payload: str) -> tuple[PaperRecord, ...]:
+    root = ET.fromstring(xml_payload)
+    papers: list[PaperRecord] = []
+    for article in root.findall(".//PubmedArticle"):
+        medline = article.find("MedlineCitation")
+        article_node = medline.find("Article") if medline is not None else None
+        if medline is None or article_node is None:
+            continue
+        pmid = _text(medline.find("PMID"))
+        title = _text(article_node.find("ArticleTitle")) or "Untitled PubMed record"
+        abstract = " ".join(
+            part.strip()
+            for part in (_element_text(node) for node in article_node.findall("Abstract/AbstractText"))
+            if part.strip()
+        )
+        journal = _text(article_node.find("Journal/Title"))
+        year = _pubmed_year(article_node)
+        authors = tuple(_pubmed_author_name(node) for node in article_node.findall("AuthorList/Author"))
+        article_ids = {
+            (node.attrib.get("IdType") or "").lower(): (node.text or "").strip()
+            for node in article.findall("PubmedData/ArticleIdList/ArticleId")
+            if (node.text or "").strip()
+        }
+        papers.append(
+            PaperRecord(
+                provider="pubmed",
+                title=title,
+                abstract=abstract or None,
+                year=year,
+                venue=journal or "PubMed",
+                authors=tuple(author for author in authors if author),
+                pmid=pmid or None,
+                pmcid=article_ids.get("pmc"),
+                doi=article_ids.get("doi"),
+                source_url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "https://pubmed.ncbi.nlm.nih.gov/",
+                open_access_url=f"https://pmc.ncbi.nlm.nih.gov/articles/{article_ids['pmc']}/" if article_ids.get("pmc") else None,
+            )
+        )
+    return tuple(papers)
+
+
+def _parse_arxiv_atom(xml_payload: str) -> tuple[PaperRecord, ...]:
+    root = ET.fromstring(xml_payload)
+    ns = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+    papers: list[PaperRecord] = []
+    for entry in root.findall("atom:entry", ns):
+        entry_id = _text(entry.find("atom:id", ns))
+        arxiv_id = entry_id.rsplit("/", 1)[-1] if entry_id else None
+        pdf_url = None
+        for link in entry.findall("atom:link", ns):
+            if link.attrib.get("title") == "pdf" or link.attrib.get("type") == "application/pdf":
+                pdf_url = link.attrib.get("href")
+                break
+        year = _year_from_prefix(_text(entry.find("atom:published", ns)))
+        papers.append(
+            PaperRecord(
+                provider="arxiv",
+                title=" ".join(_text(entry.find("atom:title", ns)).split()) or "Untitled arXiv record",
+                abstract=" ".join(_text(entry.find("atom:summary", ns)).split()) or None,
+                year=year,
+                venue="arXiv",
+                authors=tuple(_text(author.find("atom:name", ns)) for author in entry.findall("atom:author", ns)),
+                doi=_text(entry.find("arxiv:doi", ns)) or None,
+                arxiv_id=arxiv_id,
+                source_url=entry_id or "https://arxiv.org/",
+                open_access_url=pdf_url,
+            )
+        )
+    return tuple(papers)
+
+
+def _parse_semantic_scholar(payload: Mapping[str, object]) -> tuple[PaperRecord, ...]:
+    papers: list[PaperRecord] = []
+    data_items = payload.get("data", [])
+    if not isinstance(data_items, list):
+        return ()
+    for item in data_items:
+        if not isinstance(item, dict):
+            continue
+        item_map: dict[Any, Any] = item
+        external_raw = item_map.get("externalIds")
+        open_pdf_raw = item_map.get("openAccessPdf")
+        external: dict[Any, Any] = external_raw if isinstance(external_raw, dict) else {}
+        open_pdf: dict[Any, Any] = open_pdf_raw if isinstance(open_pdf_raw, dict) else {}
+        author_items = item_map.get("authors", [])
+        if not isinstance(author_items, list):
+            author_items = []
+        authors = tuple(
+            str(author.get("name"))
+            for author in author_items
+            if isinstance(author, dict) and author.get("name")
+        )
+        paper_id = item_map.get("paperId")
+        papers.append(
+            PaperRecord(
+                provider="semantic_scholar",
+                title=str(item_map.get("title") or "Untitled Semantic Scholar record"),
+                abstract=str(item_map.get("abstract")) if item_map.get("abstract") else None,
+                year=item_map.get("year") if isinstance(item_map.get("year"), int) else None,
+                venue=str(item_map.get("venue")) if item_map.get("venue") else "Semantic Scholar",
+                authors=authors,
+                pmid=str(external.get("PubMed")) if external.get("PubMed") else None,
+                pmcid=str(external.get("PubMedCentral")) if external.get("PubMedCentral") else None,
+                doi=str(external.get("DOI")) if external.get("DOI") else None,
+                arxiv_id=str(external.get("ArXiv")) if external.get("ArXiv") else None,
+                semantic_scholar_id=str(paper_id) if paper_id else None,
+                citation_count=item_map.get("citationCount")
+                if isinstance(item_map.get("citationCount"), int)
+                else None,
+                source_url=str(item_map.get("url"))
+                if item_map.get("url")
+                else f"https://www.semanticscholar.org/paper/{paper_id}",
+                open_access_url=str(open_pdf.get("url")) if open_pdf.get("url") else None,
+            )
+        )
+    return tuple(papers)
+
+
+def _empty_success(provider: str, endpoint_family: str, query: str, reason: str) -> ProviderSearchResult:
+    return ProviderSearchResult(
+        provider,
+        query,
+        (),
+        (
+            SourceStatus(
+                provider=provider,
+                endpoint_family=endpoint_family,
+                query=query,
+                status=SourceStatusValue.SUCCEEDED,
+                reason=reason,
+            ),
+        ),
+    )
+
+
+def _failed_result(provider: str, endpoint_family: str, query: str, exc: Exception) -> ProviderSearchResult:
+    status_value = SourceStatusValue.RATE_LIMITED if str(exc) == "rate_limited" else SourceStatusValue.FAILED
+    return ProviderSearchResult(
+        provider,
+        query,
+        (),
+        (
+            SourceStatus(
+                provider=provider,
+                endpoint_family=endpoint_family,
+                query=query,
+                status=status_value,
+                error_class=type(exc).__name__,
+                reason=str(exc),
+            ),
+        ),
+    )
 
 
 def _filter_fixture_records(records: tuple[PaperRecord, ...], query: str) -> tuple[PaperRecord, ...]:
@@ -175,6 +493,42 @@ def _dedupe_papers(papers: Iterable[PaperRecord]) -> tuple[PaperRecord, ...]:
     return tuple(deduped)
 
 
+def _text(node: ET.Element | None) -> str:
+    if node is None or node.text is None:
+        return ""
+    return node.text.strip()
+
+
+def _element_text(node: ET.Element | None) -> str:
+    if node is None:
+        return ""
+    return "".join(node.itertext()).strip()
+
+
+def _pubmed_year(article_node: ET.Element) -> int | None:
+    for xpath in ("Journal/JournalIssue/PubDate/Year", "ArticleDate/Year"):
+        value = _text(article_node.find(xpath))
+        year = _year_from_prefix(value)
+        if year is not None:
+            return year
+    return None
+
+
+def _pubmed_author_name(node: ET.Element) -> str:
+    collective = _text(node.find("CollectiveName"))
+    if collective:
+        return collective
+    last = _text(node.find("LastName"))
+    initials = _text(node.find("Initials"))
+    return " ".join(part for part in (last, initials) if part)
+
+
+def _year_from_prefix(value: str) -> int | None:
+    if len(value) >= 4 and value[:4].isdigit():
+        return int(value[:4])
+    return None
+
+
 _PUBMED_FIXTURES = (
     PaperRecord(
         provider="pubmed",
@@ -199,19 +553,6 @@ _PUBMED_FIXTURES = (
         venue="Nature",
         authors=("Sade-Feldman M",),
         source_url="https://pubmed.ncbi.nlm.nih.gov/30664773/",
-    ),
-)
-
-_BIORXIV_FIXTURES = (
-    PaperRecord(
-        provider="biorxiv",
-        doi="10.1101/2023.01.01.000001",
-        title="Emerging preprint on ligand receptor signaling in tumor immune niches",
-        abstract="Preprint metadata fixture for emerging cell-cell communication hypotheses.",
-        year=2023,
-        venue="bioRxiv",
-        authors=("Fixture A",),
-        source_url="https://www.biorxiv.org/content/10.1101/2023.01.01.000001v1",
     ),
 )
 

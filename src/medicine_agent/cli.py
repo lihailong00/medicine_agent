@@ -16,8 +16,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--question", required=True, help="Research question")
     run.add_argument("--data-dir", default="data", help="Input data directory (read-only)")
     run.add_argument("--output-dir", default="generated/medicine_agent", help="Generated output directory")
-    run.add_argument("--offline", action="store_true", default=True, help="Use deterministic offline/mock providers (default)")
-    run.add_argument("--live-api", action="store_true", help="Attempt live APIs only where SafetyGate permits")
+    run.add_argument(
+        "--offline",
+        action="store_true",
+        default=False,
+        help="Force deterministic offline/mock providers; this is also the default unless --live-api is set",
+    )
+    run.add_argument(
+        "--live-api",
+        action="store_true",
+        help="Use real allowlisted PubMed/NCBI, arXiv, and Semantic Scholar API queries",
+    )
     run.add_argument("--include-preprints", action="store_true", help="Include preprint sources in source plan")
     return parser
 

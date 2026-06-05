@@ -44,8 +44,8 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     sources = select_sources(request.question)
-    if request.include_preprints and "biorxiv" not in sources:
-        sources = (*sources, "biorxiv")
+    if request.include_preprints and "arxiv" not in sources:
+        sources = (*sources, "arxiv")
     decomposition = decompose_question(request.question, sources=sources)
     source_plans = [
         SourcePlan(source=query.provider, query=query.query, rationale=query.rationale)
@@ -56,6 +56,7 @@ def run_research(request: ResearchRequest) -> dict[str, Any]:
         literature_payload = build_default_coordinator().search_question(
             request.question,
             allow_live=request.live_api and not request.offline,
+            network_gate=safety,
         )
         paper_payloads = cast(list[Mapping[str, Any]], literature_payload["papers"])
         status_payloads = cast(list[Mapping[str, Any]], literature_payload["search_log"])

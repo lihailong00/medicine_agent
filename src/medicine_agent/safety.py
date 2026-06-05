@@ -4,11 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from medicine_agent.models import OperationClass, SafetyDecision, SafetyDecisionStatus
 
 # Compatibility alias used by the LIANA lane tests and artifacts.
 SafetyStatus = SafetyDecisionStatus
+ALLOWED_LIVE_HOSTS = frozenset(
+    {
+        "eutils.ncbi.nlm.nih.gov",
+        "export.arxiv.org",
+        "api.semanticscholar.org",
+    }
+)
 
 
 class SafetyGate:
@@ -35,8 +43,13 @@ class SafetyGate:
 
     def decide(self, operation: OperationClass | str, target: str | Path, rationale: str) -> SafetyDecision:
         op = _coerce_operation(operation)
-        target_path = Path(target) if isinstance(target, Path) or _looks_like_path(str(target)) else None
-        target_text = str(target_path.resolve()) if target_path is not None else str(target)
+        raw_target = str(target)
+        target_path = (
+            Path(target)
+            if not _looks_like_url(raw_target) and (isinstance(target, Path) or _looks_like_path(raw_target))
+            else None
+        )
+        target_text = str(target_path.resolve()) if target_path is not None else raw_target
 
         if op == OperationClass.READ_FILE:
             status = (
@@ -56,11 +69,22 @@ class SafetyGate:
                 if status == SafetyDecisionStatus.ALLOWED
                 else "derived artifact writes must stay inside the generated output directory"
             )
+        elif op == OperationClass.NETWORK_CALL:
+            parsed = urlparse(str(target))
+            status = (
+                SafetyDecisionStatus.ALLOWED
+                if parsed.scheme == "https" and parsed.netloc in ALLOWED_LIVE_HOSTS
+                else SafetyDecisionStatus.BLOCKED
+            )
+            decision_rationale = (
+                rationale
+                if status == SafetyDecisionStatus.ALLOWED
+                else "network calls are restricted to PubMed/NCBI E-utilities, arXiv API, and Semantic Scholar API"
+            )
         elif op == OperationClass.OVERWRITE_INPUT:
             status = SafetyDecisionStatus.NEEDS_CONFIRMATION
             decision_rationale = "overwriting input data requires explicit confirmation"
         elif op in {
-            OperationClass.NETWORK_CALL,
             OperationClass.RUN_SCRIPT,
             OperationClass.INSTALL_DEP,
             OperationClass.USE_API_KEY,
@@ -87,6 +111,9 @@ class SafetyGate:
 
     def allow_write_derived_output(self, path: str | Path) -> SafetyDecision:
         return self.decide(OperationClass.WRITE_DERIVED_OUTPUT, path, "write derived output artifact")
+
+    def allow_network_call(self, url: str) -> SafetyDecision:
+        return self.decide(OperationClass.NETWORK_CALL, url, "live literature API request to an allowlisted provider")
 
     def needs_confirmation(self, operation: OperationClass | str, target: str | Path, rationale: str) -> SafetyDecision:
         op = _coerce_operation(operation)
@@ -149,3 +176,7 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 
 def _looks_like_path(value: str) -> bool:
     return "/" in value or "\\" in value or value.startswith(".") or bool(Path(value).suffix)
+
+
+def _looks_like_url(value: str) -> bool:
+    return value.startswith(("http://", "https://"))

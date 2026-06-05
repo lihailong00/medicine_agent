@@ -11,7 +11,6 @@ from .base import (
 )
 from .providers import (
     ArxivProvider,
-    BioRxivProvider,
     LiteratureSearchCoordinator,
     PubMedProvider,
     SemanticScholarProvider,
@@ -21,7 +20,6 @@ from .source_selector import select_sources
 
 __all__ = [
     "ArxivProvider",
-    "BioRxivProvider",
     "CitationEvidenceRecord",
     "LiteratureProvider",
     "LiteratureSearchCoordinator",

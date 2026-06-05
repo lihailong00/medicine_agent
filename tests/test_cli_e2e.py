@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from medicine_agent import cli
+
 
 def test_cli_offline_e2e_generates_required_artifacts_without_mutating_data(tmp_path):
     before = {p: p.stat().st_mtime_ns for p in Path("data").glob("*.csv")}
@@ -27,3 +29,47 @@ def test_cli_offline_e2e_generates_required_artifacts_without_mutating_data(tmp_
 def test_cli_missing_question_exits_nonzero():
     proc = subprocess.run([sys.executable, "-m", "medicine_agent.cli", "run"], text=True, capture_output=True, check=False, env={**__import__("os").environ, "PYTHONPATH": "src"})
     assert proc.returncode != 0
+
+
+def test_cli_live_api_flag_disables_offline_mode(monkeypatch):
+    captured = {}
+
+    def fake_run_research(request):
+        captured["request"] = request
+        return {
+            "report_path": "report.md",
+            "manifest_path": "run_manifest.json",
+            "artifact_manifest_path": "artifact_manifest.json",
+            "search_log_path": "search_log.json",
+            "output_dir": "generated/medicine_agent",
+        }
+
+    monkeypatch.setattr(cli, "run_research", fake_run_research)
+
+    exit_code = cli.main(["run", "--question", "tumor immune communication", "--live-api"])
+
+    assert exit_code == 0
+    assert captured["request"].live_api is True
+    assert captured["request"].offline is False
+
+
+def test_cli_defaults_to_offline_without_live_api(monkeypatch):
+    captured = {}
+
+    def fake_run_research(request):
+        captured["request"] = request
+        return {
+            "report_path": "report.md",
+            "manifest_path": "run_manifest.json",
+            "artifact_manifest_path": "artifact_manifest.json",
+            "search_log_path": "search_log.json",
+            "output_dir": "generated/medicine_agent",
+        }
+
+    monkeypatch.setattr(cli, "run_research", fake_run_research)
+
+    exit_code = cli.main(["run", "--question", "tumor immune communication"])
+
+    assert exit_code == 0
+    assert captured["request"].live_api is False
+    assert captured["request"].offline is True
