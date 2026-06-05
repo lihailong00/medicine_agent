@@ -491,5 +491,12 @@ def test_orchestrator_uses_llm_review_synthesis_when_available(monkeypatch, tmp_
     assert review_path.exists()
     assert manifest["review_synthesis"]["source"] == "llm_deepseek"
     assert manifest["evidence"][0]["claim"] == "近期糖尿病研究强调 beta cell stress。"
+    debug_messages = "\n".join(item["message"] for item in manifest["debug_steps"])
+    assert "查询改写结果：search_topic=`diabetes mellitus recent advances`" in debug_messages
+    assert "来源计划预览[1]：pubmed query=`(diabetes mellitus recent advances) AND (review OR mechanism OR single-cell)`" in debug_messages
+    assert "论文预览[1/1]：pubmed；id=PMID-1；Diabetes beta cell review" in debug_messages
+    assert "基础证据预览[1/" in debug_messages
+    assert "LLM 摘要预览：LLM 生成的糖尿病结构化综述摘要。" in debug_messages
+    assert "LLM 关键发现预览[1/1]" in debug_messages
     assert "综述生成器：`llm_deepseek`" in report
     assert "LLM 生成的糖尿病结构化综述摘要" in report
